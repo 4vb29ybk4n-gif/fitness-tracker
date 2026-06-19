@@ -1,0 +1,15 @@
+{
+  "short_name": "피트니스",
+  "name": "My Fitness Journey",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#141414",
+  "background_color": "#141414"
+}
