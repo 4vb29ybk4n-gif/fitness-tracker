@@ -403,7 +403,7 @@ export default function FitnessTracker(){
       )}
 
       {/* 헤더 */}
-      <div style={{background:"linear-gradient(135deg,#1a1a1a,#222)",borderBottom:"1px solid #2a2a2a",padding:"24px 20px 20px"}}>
+      <div style={{background:"linear-gradient(135deg,#1a1a1a,#222)",borderBottom:"1px solid #2a2a2a",padding:"36px 20px 20px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div style={{fontSize:11,letterSpacing:3,color:"#C8A96E",marginBottom:6,textTransform:"uppercase"}}>My Fitness Journey</div>
           <div style={{display:"flex",gap:6}}>
