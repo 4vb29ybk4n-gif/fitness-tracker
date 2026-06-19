@@ -1,13 +1,16 @@
+```javascript
 import { useState, useEffect } from "react";
 import { getUserId, setUserId, loadData, saveData } from "./supabaseClient";
 
 // ── 날짜 유틸 ──────────────────────────────────────────
-const START_DATE = new Date(2026, 5, 15);
-const END_DATE   = new Date(2026, 7, 31);
+const DEFAULT_START_DATE = "2026-06-15";
+const DEFAULT_END_DATE   = "2026-08-31";
+function parseDateStr(s){ const [y,m,d]=s.split("-").map(Number); return new Date(y,m-1,d); }
+function fmtDateLabel(dateStr){ const d=parseDateStr(dateStr); return `${d.getMonth()+1}월 ${d.getDate()}일`; }
 function toMidnight(d) { const c = new Date(d); c.setHours(0,0,0,0); return c; }
 function formatDate(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
 function getDaysInMonth(y,m) { return new Date(y,m+1,0).getDate(); }
-function getTotalWeeks() { return Math.ceil((END_DATE-START_DATE)/(7*24*60*60*1000)); }
+function getTotalWeeks(startDate,endDate) { return Math.ceil((endDate-startDate)/(7*24*60*60*1000)); }
 const DAYS_KO   = ["일","월","화","수","목","금","토"];
 const MONTHS_KO = ["1월","2월","3월","4월","5월","6월","7월","8월","9월","10월","11월","12월"];
 const DAY_KR    = ["일","월","화","수","목","금","토"];
@@ -172,6 +175,9 @@ export default function FitnessTracker(){
 
   const [userId,setUserIdState]          = useState(getUserId());
   const [showUserIdModal,setShowUserIdModal] = useState(false);
+  const [dateRange,setDateRange]         = useState({start:DEFAULT_START_DATE,end:DEFAULT_END_DATE});
+  const [showDateForm,setShowDateForm]   = useState(false);
+  const [editDateRange,setEditDateRange] = useState({start:DEFAULT_START_DATE,end:DEFAULT_END_DATE});
   const [tab,setTab]                     = useState("calendar");
   const [viewMonth,setViewMonth]         = useState({year:today.getFullYear(),month:today.getMonth()});
   const [calSelected,setCalSelected]     = useState(null);
@@ -194,7 +200,9 @@ export default function FitnessTracker(){
   const [saveMsg,setSaveMsg]             = useState("");
   const [workoutDate,setWorkoutDate]     = useState(todayStr);
 
-  // ── 클라우드에서 불러오기 ──────────────────────────
+  const START_DATE = parseDateStr(dateRange.start);
+  const END_DATE   = parseDateStr(dateRange.end);
+
   useEffect(()=>{
     async function load(){
       const w   = await loadData(userId,"workoutLog",{});
@@ -202,11 +210,13 @@ export default function FitnessTracker(){
       const cats= await loadData(userId,"categories",DEFAULT_CATEGORIES);
       const g   = await loadData(userId,"goals",GOALS);
       const b   = await loadData(userId,"baseInbody",INITIAL_INBODY);
+      const dr  = await loadData(userId,"dateRange",{start:DEFAULT_START_DATE,end:DEFAULT_END_DATE});
       setWorkoutLog(w||{});
       setInbodyLogs(ib&&ib.length?ib:[INITIAL_INBODY]);
       setCategories(cats&&cats.length?cats:DEFAULT_CATEGORIES);
       setGoals(g||GOALS);
       setBaseInbody(b||INITIAL_INBODY);
+      setDateRange(dr&&dr.start&&dr.end?dr:{start:DEFAULT_START_DATE,end:DEFAULT_END_DATE});
       setLoaded(true);
     }
     load();
@@ -230,6 +240,10 @@ export default function FitnessTracker(){
     await saveData(userId,"goals",g);
     await saveData(userId,"baseInbody",b);
     flash("저장됨 ✓");
+  }
+  async function persistDateRange(dr){
+    const ok = await saveData(userId,"dateRange",dr);
+    flash(ok?"저장됨 ✓":"저장 실패");
   }
 
   function updateDayLog(dateKey,updater){
@@ -297,7 +311,6 @@ export default function FitnessTracker(){
     setLoaded(false);
   }
 
-  // ── 달력 ────────────────────────────────────────────
   const {year,month}=viewMonth;
   const daysInMonth=getDaysInMonth(year,month);
   const firstDay=new Date(year,month,1).getDay();
@@ -308,7 +321,6 @@ export default function FitnessTracker(){
     const dl=workoutLog[dateStr]; if(!dl) return 0;
     return Object.values(dl.checks||{}).filter(Boolean).length;
   }
-  
 
   function hasCatActivity(dateStr,catId){
     const dl=workoutLog[dateStr]; if(!dl) return false;
@@ -345,7 +357,6 @@ export default function FitnessTracker(){
   function fmtShort(ds){const d=new Date(ds+"T00:00:00");return `${d.getMonth()+1}/${d.getDate()} (${DAY_KR[d.getDay()]})`;}
 
   const dayLog=workoutLog[workoutDate]||{checks:{},values:{},memo:""};
-  
 
   if(!loaded) return(
     <div style={{minHeight:"100vh",background:"#141414",display:"flex",alignItems:"center",justifyContent:"center",color:"#C8A96E",fontSize:14}}>
@@ -360,15 +371,48 @@ export default function FitnessTracker(){
 
       {showUserIdModal&&<UserIdModal userId={userId} onSave={handleUserIdSave} onClose={()=>setShowUserIdModal(false)}/>}
 
+      {showDateForm&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:1001,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{width:"100%",maxWidth:340,background:"#1a1a1a",borderRadius:16,padding:20}}>
+            <div style={{fontSize:15,fontWeight:700,marginBottom:14,color:"#f0ece4"}}>📅 목표 기간 수정</div>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,color:"#888",marginBottom:6}}>시작일</div>
+              <input type="date" value={editDateRange.start} onChange={e=>setEditDateRange(p=>({...p,start:e.target.value}))}
+                style={{width:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"10px",color:"#f0ece4",fontSize:14,boxSizing:"border-box"}}/>
+            </div>
+            <div style={{marginBottom:18}}>
+              <div style={{fontSize:11,color:"#888",marginBottom:6}}>종료일 (목표일)</div>
+              <input type="date" value={editDateRange.end} onChange={e=>setEditDateRange(p=>({...p,end:e.target.value}))}
+                style={{width:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"10px",color:"#f0ece4",fontSize:14,boxSizing:"border-box"}}/>
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>{
+                if(!editDateRange.start||!editDateRange.end) return;
+                const next={start:editDateRange.start,end:editDateRange.end};
+                setDateRange(next);
+                persistDateRange(next);
+                setShowDateForm(false);
+              }} style={{flex:1,background:"#C8A96E",color:"#141414",border:"none",borderRadius:8,padding:"12px",fontSize:13,fontWeight:700,cursor:"pointer"}}>저장</button>
+              <button onClick={()=>setShowDateForm(false)} style={{background:"#2a2a2a",color:"#888",border:"none",borderRadius:8,padding:"12px 16px",fontSize:13,cursor:"pointer"}}>취소</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 헤더 */}
       <div style={{background:"linear-gradient(135deg,#1a1a1a,#222)",borderBottom:"1px solid #2a2a2a",padding:"24px 20px 20px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
           <div style={{fontSize:11,letterSpacing:3,color:"#C8A96E",marginBottom:6,textTransform:"uppercase"}}>My Fitness Journey</div>
-          <button onClick={()=>setShowUserIdModal(true)} style={{background:"#2a2a2a",border:"1px solid #333",borderRadius:8,color:"#888",padding:"5px 10px",fontSize:10,cursor:"pointer"}}>
-            🔗 기기 연결
-          </button>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={()=>{setEditDateRange(dateRange);setShowDateForm(true);}} style={{background:"#2a2a2a",border:"1px solid #333",borderRadius:8,color:"#888",padding:"5px 10px",fontSize:10,cursor:"pointer"}}>
+              📅 기간 수정
+            </button>
+            <button onClick={()=>setShowUserIdModal(true)} style={{background:"#2a2a2a",border:"1px solid #333",borderRadius:8,color:"#888",padding:"5px 10px",fontSize:10,cursor:"pointer"}}>
+              🔗 기기 연결
+            </button>
+          </div>
         </div>
-        <div style={{fontSize:22,fontWeight:700,marginBottom:16}}>6월 15일 → 8월 31일</div>
+        <div style={{fontSize:22,fontWeight:700,marginBottom:16}}>{fmtDateLabel(dateRange.start)} → {fmtDateLabel(dateRange.end)}</div>
         <div style={{marginBottom:8}}>
           <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#888",marginBottom:6}}>
             <span>목표까지</span>
@@ -384,7 +428,7 @@ export default function FitnessTracker(){
         {[
           {label:"이번주 헬스",    value:`${weekGym}회`,         sub:"목표 3회", color:weekGym>=3?"#6ec87a":"#C8A96E"},
           {label:"이번주 필라테스", value:`${weekPilates}회`,     sub:"목표 2회", color:weekPilates>=2?"#6ec87a":"#C8A96E"},
-          {label:"누적 운동일",    value:`${totalWorkoutDays}일`, sub:`목표 ${getTotalWeeks()*3}일`, color:"#C8A96E"},
+          {label:"누적 운동일",    value:`${totalWorkoutDays}일`, sub:`목표 ${getTotalWeeks(START_DATE,END_DATE)*3}일`, color:"#C8A96E"},
         ].map((s,i)=>(
           <div key={i} style={{background:"#1a1a1a",padding:"14px 8px",textAlign:"center"}}>
             <div style={{fontSize:9,color:"#555",marginBottom:4}}>{s.label}</div>
@@ -791,3 +835,6 @@ export default function FitnessTracker(){
     </div>
   );
 }
+```
+
+이걸 GitHub `App.js` 편집창에 전체 붙여넣고 **Commit changes** 눌러주세요 🙂
