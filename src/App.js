@@ -1,4 +1,3 @@
-```javascript
 import { useState, useEffect } from "react";
 import { getUserId, setUserId, loadData, saveData } from "./supabaseClient";
 
@@ -200,6 +199,7 @@ export default function FitnessTracker(){
   const [saveMsg,setSaveMsg]             = useState("");
   const [workoutDate,setWorkoutDate]     = useState(todayStr);
 
+  // ── 클라우드에서 불러오기 ──────────────────────────
   const START_DATE = parseDateStr(dateRange.start);
   const END_DATE   = parseDateStr(dateRange.end);
 
@@ -311,6 +311,7 @@ export default function FitnessTracker(){
     setLoaded(false);
   }
 
+  // ── 달력 ────────────────────────────────────────────
   const {year,month}=viewMonth;
   const daysInMonth=getDaysInMonth(year,month);
   const firstDay=new Date(year,month,1).getDay();
@@ -321,6 +322,7 @@ export default function FitnessTracker(){
     const dl=workoutLog[dateStr]; if(!dl) return 0;
     return Object.values(dl.checks||{}).filter(Boolean).length;
   }
+  
 
   function hasCatActivity(dateStr,catId){
     const dl=workoutLog[dateStr]; if(!dl) return false;
@@ -357,6 +359,7 @@ export default function FitnessTracker(){
   function fmtShort(ds){const d=new Date(ds+"T00:00:00");return `${d.getMonth()+1}/${d.getDate()} (${DAY_KR[d.getDay()]})`;}
 
   const dayLog=workoutLog[workoutDate]||{checks:{},values:{},memo:""};
+  
 
   if(!loaded) return(
     <div style={{minHeight:"100vh",background:"#141414",display:"flex",alignItems:"center",justifyContent:"center",color:"#C8A96E",fontSize:14}}>
@@ -835,6 +838,3 @@ export default function FitnessTracker(){
     </div>
   );
 }
-```
-
-이걸 GitHub `App.js` 편집창에 전체 붙여넣고 **Commit changes** 눌러주세요 🙂
