@@ -1398,14 +1398,14 @@ export default function FitnessTracker(){
             ):(
               <div style={{background:"#1e1e1e",borderRadius:12,padding:14}}>
                 <div style={{fontSize:11,color:"#555",marginBottom:10,fontWeight:600}}>📍 시작 수치 입력</div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+                <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:8,marginBottom:14}}>
                   {[{key:"date",label:"측정일",type:"date"},{key:"weight",label:"체중(kg)",type:"number"},
                     {key:"muscle",label:"골격근량(kg)",type:"number"},{key:"fatMass",label:"체지방량(kg)",type:"number"},
                     {key:"fatPct",label:"체지방률(%)",type:"number"},{key:"score",label:"인바디점수",type:"number"}].map(f=>(
-                    <div key={f.key}>
+                    <div key={f.key} style={{minWidth:0,overflow:"hidden"}}>
                       <div style={{fontSize:10,color:"#555",marginBottom:4}}>{f.label}</div>
                       <input type={f.type} value={editBase[f.key]} onChange={e=>setEditBase(p=>({...p,[f.key]:e.target.value}))}
-                        style={{width:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"7px 9px",color:"#f0ece4",fontSize:13,boxSizing:"border-box"}}/>
+                        style={{width:"100%",minWidth:0,maxWidth:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"7px 6px",color:"#f0ece4",fontSize:f.type==="date"?11:13,boxSizing:"border-box"}}/>
                     </div>
                   ))}
                 </div>
@@ -1508,14 +1508,14 @@ export default function FitnessTracker(){
 
             {showInbodyForm&&(
               <div style={{background:"#1e1e1e",borderRadius:12,padding:16,marginBottom:16}}>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+                <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:8,marginBottom:12}}>
                   {[{key:"date",label:"측정일",type:"date"},{key:"weight",label:"체중(kg)",type:"number"},
                     {key:"muscle",label:"골격근량(kg)",type:"number"},{key:"fatMass",label:"체지방량(kg)",type:"number"},
                     {key:"fatPct",label:"체지방률(%)",type:"number"},{key:"score",label:"인바디 점수",type:"number"}].map(f=>(
-                    <div key={f.key}>
+                    <div key={f.key} style={{minWidth:0,overflow:"hidden"}}>
                       <div style={{fontSize:10,color:"#555",marginBottom:4}}>{f.label}</div>
                       <input type={f.type} value={newInbody[f.key]} onChange={e=>setNewInbody(p=>({...p,[f.key]:e.target.value}))}
-                        style={{width:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"8px 10px",color:"#f0ece4",fontSize:13,boxSizing:"border-box"}}/>
+                        style={{width:"100%",minWidth:0,maxWidth:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"8px 6px",color:"#f0ece4",fontSize:f.type==="date"?11:13,boxSizing:"border-box"}}/>
                     </div>
                   ))}
                 </div>
