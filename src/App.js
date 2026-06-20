@@ -65,8 +65,8 @@ const DEFAULT_CATEGORIES = [
     ]},
 ];
 
-const GOALS = {weight:56.4, muscle:25.5, fatMass:11.3, fatPct:20.0};
-const INITIAL_INBODY = {date:"2026-06-15",weight:56.4,muscle:23.5,fatMass:13.3,fatPct:23.5,score:74};
+const GOALS = {weight:0, muscle:0, fatMass:0, fatPct:0};
+const INITIAL_INBODY = {date:formatDate(new Date()),weight:0,muscle:0,fatMass:0,fatPct:0,score:0};
 const CAT_COLOR_PALETTE = ["#8E7CC3","#5DADE2","#F4D03F","#48C9B0","#EC7063","#AF7AC5","#52BE80"];
 const CAT_EMOJI_OPTIONS = ["⭐","🧘","🤸","🚴","🏃","🥊","🏊","⛹️","🤾","🎯"];
 const LOADING_MESSAGES = [
@@ -401,6 +401,18 @@ export default function FitnessTracker(){
   function saveCategories(cats){
     setCategories(cats); persistCats(cats);
     setExpandedCat(prev=>Object.fromEntries(cats.map(c=>[c.id,prev[c.id]??false])));
+  }
+
+  function resetToDefaults(){
+    const ok=window.confirm("운동 항목과 인바디 기록을 앱 기본값으로 초기화할까요?\n현재 입력된 카테고리/항목 구성과 인바디 시작값이 모두 사라져요.");
+    if(!ok) return;
+    saveCategories(DEFAULT_CATEGORIES);
+    setBaseInbody(INITIAL_INBODY);
+    setInbodyLogs([INITIAL_INBODY]);
+    setGoals(GOALS);
+    persistGoals(GOALS,INITIAL_INBODY);
+    persistInbody([INITIAL_INBODY]);
+    flash("기본값으로 초기화됨 ✓");
   }
 
   function addCategory(){
@@ -1224,6 +1236,11 @@ export default function FitnessTracker(){
               </button>
             )}
 
+            <button onClick={resetToDefaults}
+              style={{width:"100%",background:"transparent",border:"1px solid #5a2a2a",borderRadius:10,padding:"10px",fontSize:11,color:"#E85D3D",cursor:"pointer",marginBottom:14}}>
+              ↺ 운동 항목 · 인바디 기본값으로 초기화
+            </button>
+
             <div style={{background:"#1e1e1e",borderRadius:12,border:"1px solid #2a2a2a",padding:"14px 16px",marginBottom:14}}>
               <div style={{fontSize:12,fontWeight:600,color:"#666",marginBottom:8}}>📝 오늘의 메모 (컨디션·통증·느낀 점)</div>
               <textarea value={dayLog.memo||""} onChange={e=>saveMemo(workoutDate,e.target.value)}
@@ -1241,13 +1258,18 @@ export default function FitnessTracker(){
           <div style={{marginBottom:20}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
               <div style={{fontSize:12,color:"#C8A96E",letterSpacing:2,textTransform:"uppercase"}}>내 목표 설정</div>
-              <button onClick={()=>{
-                setEditGoal({muscle:goals.muscle,fatMass:goals.fatMass,fatPct:goals.fatPct});
-                setEditBase({date:baseInbody.date,weight:baseInbody.weight,muscle:baseInbody.muscle,fatMass:baseInbody.fatMass,fatPct:baseInbody.fatPct,score:baseInbody.score});
-                setShowGoalForm(!showGoalForm);
-              }} style={{background:showGoalForm?"#444":"#2a2a2a",color:"#C8A96E",border:"1px solid #C8A96E",borderRadius:8,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                ✏️ 수정
-              </button>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={resetToDefaults} style={{background:"#2a2a2a",color:"#E85D3D",border:"1px solid #5a2a2a",borderRadius:8,padding:"5px 10px",fontSize:11,cursor:"pointer"}}>
+                  ↺ 초기화
+                </button>
+                <button onClick={()=>{
+                  setEditGoal({muscle:goals.muscle,fatMass:goals.fatMass,fatPct:goals.fatPct});
+                  setEditBase({date:baseInbody.date,weight:baseInbody.weight,muscle:baseInbody.muscle,fatMass:baseInbody.fatMass,fatPct:baseInbody.fatPct,score:baseInbody.score});
+                  setShowGoalForm(!showGoalForm);
+                }} style={{background:showGoalForm?"#444":"#2a2a2a",color:"#C8A96E",border:"1px solid #C8A96E",borderRadius:8,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                  ✏️ 수정
+                </button>
+              </div>
             </div>
 
             {!showGoalForm?(
