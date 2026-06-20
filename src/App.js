@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { getUserId, setUserId, loadData, saveData, supabase } from "./supabaseClient";
 
 // ── 날짜 유틸 ──────────────────────────────────────────
@@ -251,7 +251,48 @@ function UserIdModal({userId,onSave,onClose}){
   );
 }
 
-// ── 메인 앱 ───────────────────────────────────────────
+// ── 롤러 휠 (스크롤로 숫자 선택) ──────────────────────
+function RollerWheel({label,unit,value,onChange,min,max,step}){
+  const itemHeight=36;
+  const options=[];
+  for(let v=min;v<=max+0.001;v=Math.round((v+step)*10)/10) options.push(Math.round(v*10)/10);
+  const scrollRef = useRef(null);
+  const idx=options.findIndex(o=>Math.abs(o-value)<step/2);
+  const safeIdx=idx===-1?0:idx;
+
+  useEffect(()=>{
+    if(scrollRef.current){
+      scrollRef.current.scrollTop=safeIdx*itemHeight;
+    }
+  },[]);
+
+  function handleScroll(e){
+    const top=e.target.scrollTop;
+    const newIdx=Math.round(top/itemHeight);
+    const clamped=Math.max(0,Math.min(options.length-1,newIdx));
+    const newVal=options[clamped];
+    if(newVal!==undefined&&Math.abs(newVal-value)>=step/2) onChange(newVal);
+  }
+
+  return(
+    <div style={{textAlign:"center"}}>
+      <div style={{fontSize:11,color:"#888",marginBottom:6}}>{label}</div>
+      <div style={{position:"relative",height:itemHeight*3,overflow:"hidden",background:"#1e1e1e",borderRadius:10,border:"1px solid #2a2a2a"}}>
+        <div style={{position:"absolute",top:itemHeight,left:0,right:0,height:itemHeight,background:"rgba(200,169,110,0.12)",borderTop:"1px solid #C8A96E",borderBottom:"1px solid #C8A96E",pointerEvents:"none",zIndex:1}}/>
+        <div ref={scrollRef} onScroll={handleScroll} style={{height:"100%",overflowY:"scroll",scrollSnapType:"y mandatory",WebkitOverflowScrolling:"touch"}}>
+          <div style={{height:itemHeight}}/>
+          {options.map((o,i)=>(
+            <div key={i} style={{height:itemHeight,display:"flex",alignItems:"center",justifyContent:"center",scrollSnapAlign:"center",fontSize:Math.abs(o-value)<step/2?17:14,fontWeight:Math.abs(o-value)<step/2?700:400,color:Math.abs(o-value)<step/2?"#C8A96E":"#666"}}>
+              {o}{unit}
+            </div>
+          ))}
+          <div style={{height:itemHeight}}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function FitnessTracker(){
   const today    = toMidnight(new Date());
   const todayStr = formatDate(today);
@@ -279,6 +320,10 @@ export default function FitnessTracker(){
   const [baseInbody,setBaseInbody]         = useState(INITIAL_INBODY);
   const [editGoal,setEditGoal]             = useState({muscle:"",fatMass:"",fatPct:""});
   const [editBase,setEditBase]             = useState({date:"",weight:"",muscle:"",fatMass:"",fatPct:"",score:""});
+  const [onboardVals,setOnboardVals]       = useState({weight:60,muscle:24,fatMass:15,fatPct:25});
+  const [onboardStep,setOnboardStep]       = useState("roller"); // "roller" → "goal"
+  const [goalDelta,setGoalDelta]           = useState({muscle:2.0,fatMass:-2.0,fatPct:-3.0});
+  const [useManualEntry,setUseManualEntry] = useState(false);
   const [inlineEdit,setInlineEdit]       = useState(null);
   const [newItemName,setNewItemName]     = useState("");
   const [newItemType,setNewItemType]     = useState("minutes");
@@ -401,6 +446,28 @@ export default function FitnessTracker(){
     setShowInbodyForm(false);
   }
 
+  // 최초 시작: 롤러 휠/수동 입력값 → 시작수치 + 첫 측정기록으로 동시 저장
+  async function completeOnboarding(vals){
+    const base={date:todayStr,weight:vals.weight,muscle:vals.muscle,fatMass:vals.fatMass,fatPct:vals.fatPct,score:vals.score||0};
+    setBaseInbody(base);
+    setInbodyLogs([base]);
+    await persistInbody([base]);
+    await saveData(userId,"baseInbody",base);
+    setOnboardStep("goal");
+  }
+
+  // 목표 변화량(+/-) 확정: 시작수치 기준으로 실제 목표값 계산
+  async function confirmGoalDelta(){
+    const newGoals={
+      muscle:Math.round((baseInbody.muscle+goalDelta.muscle)*10)/10,
+      fatMass:Math.round((baseInbody.fatMass+goalDelta.fatMass)*10)/10,
+      fatPct:Math.round((baseInbody.fatPct+goalDelta.fatPct)*10)/10,
+    };
+    setGoals(newGoals);
+    await saveData(userId,"goals",newGoals);
+    flash("목표 설정 완료 ✓");
+  }
+
   // ── 인바디 결과지 OCR 자동 인식 ──────────────────────
   function parseInbodyText(text){
     const lines=text.split("\n").map(l=>l.trim()).filter(Boolean);
@@ -511,6 +578,7 @@ export default function FitnessTracker(){
     setBaseInbody(INITIAL_INBODY);
     setInbodyLogs([INITIAL_INBODY]);
     setGoals(GOALS);
+    setOnboardStep("roller");
     persistGoals(GOALS,INITIAL_INBODY);
     persistInbody([INITIAL_INBODY]);
     flash("기본값으로 초기화됨 ✓");
@@ -616,6 +684,7 @@ export default function FitnessTracker(){
   const cheerMsg=getCheerMessage(totalWorkoutDays);
 
   const latest=inbodyLogs[inbodyLogs.length-1];
+  const isOnboarding=inbodyLogs.length<=1&&baseInbody.weight===0&&baseInbody.muscle===0;
   const muscleProgress=(latest&&(goals.muscle-baseInbody.muscle)!==0)?((latest.muscle-baseInbody.muscle)/(goals.muscle-baseInbody.muscle))*100:0;
   const fatProgress=(latest&&(baseInbody.fatMass-goals.fatMass)!==0)?((baseInbody.fatMass-latest.fatMass)/(baseInbody.fatMass-goals.fatMass))*100:0;
   const fatPctProgress=(latest&&(baseInbody.fatPct-goals.fatPct)!==0)?((baseInbody.fatPct-latest.fatPct)/(baseInbody.fatPct-goals.fatPct))*100:0;
@@ -1356,6 +1425,78 @@ export default function FitnessTracker(){
       {tab==="inbody"&&(
         <div style={{padding:"20px 16px"}}>
 
+          {isOnboarding?(
+            <div style={{marginBottom:20,background:"#1e1e1e",borderRadius:12,padding:16}}>
+              {onboardStep==="roller"?(
+                <>
+                  <div style={{fontSize:13,fontWeight:700,color:"#C8A96E",marginBottom:4}}>👋 시작하기 전에, 지금 수치를 입력해주세요</div>
+                  <div style={{fontSize:11,color:"#666",marginBottom:14}}>이 수치가 시작 기준점이 되고, 첫 측정 기록으로도 저장돼요. 인바디 결과지가 없으면 대략적으로 골라도 괜찮아요.</div>
+
+                  <button onClick={()=>setUseManualEntry(!useManualEntry)} style={{background:"none",border:"none",color:"#888",fontSize:11,textDecoration:"underline",cursor:"pointer",marginBottom:12,padding:0}}>
+                    {useManualEntry?"↺ 롤러로 선택하기":"⌨️ 직접 숫자로 입력하기"}
+                  </button>
+
+                  {!useManualEntry?(
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+                      <RollerWheel label="체중" unit="kg" value={onboardVals.weight} min={35} max={120} step={0.5}
+                        onChange={v=>setOnboardVals(p=>({...p,weight:v}))}/>
+                      <RollerWheel label="골격근량" unit="kg" value={onboardVals.muscle} min={10} max={45} step={0.5}
+                        onChange={v=>setOnboardVals(p=>({...p,muscle:v}))}/>
+                      <RollerWheel label="체지방량" unit="kg" value={onboardVals.fatMass} min={3} max={50} step={0.5}
+                        onChange={v=>setOnboardVals(p=>({...p,fatMass:v}))}/>
+                      <RollerWheel label="체지방률" unit="%" value={onboardVals.fatPct} min={5} max={50} step={0.5}
+                        onChange={v=>setOnboardVals(p=>({...p,fatPct:v}))}/>
+                    </div>
+                  ):(
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
+                      {[{key:"weight",label:"체중(kg)"},{key:"muscle",label:"골격근량(kg)"},{key:"fatMass",label:"체지방량(kg)"},{key:"fatPct",label:"체지방률(%)"}].map(f=>(
+                        <div key={f.key}>
+                          <div style={{fontSize:10,color:"#555",marginBottom:4}}>{f.label}</div>
+                          <input type="number" value={onboardVals[f.key]} onChange={e=>setOnboardVals(p=>({...p,[f.key]:parseFloat(e.target.value)||0}))}
+                            style={{width:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"8px 10px",color:"#f0ece4",fontSize:14,boxSizing:"border-box"}}/>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <button onClick={()=>completeOnboarding(onboardVals)} style={{width:"100%",background:"#C8A96E",color:"#141414",border:"none",borderRadius:8,padding:"12px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                    이 수치로 시작하기 →
+                  </button>
+                </>
+              ):(
+                <>
+                  <div style={{fontSize:13,fontWeight:700,color:"#C8A96E",marginBottom:4}}>🎯 목표를 정해주세요</div>
+                  <div style={{fontSize:11,color:"#666",marginBottom:16}}>시작 수치에서 얼마나 변화시킬지 +/- 로 조정하세요.</div>
+
+                  {[
+                    {key:"muscle",label:"골격근량",unit:"kg",base:baseInbody.muscle,step:0.5,goodDir:1},
+                    {key:"fatMass",label:"체지방량",unit:"kg",base:baseInbody.fatMass,step:0.5,goodDir:-1},
+                    {key:"fatPct",label:"체지방률",unit:"%",base:baseInbody.fatPct,step:0.5,goodDir:-1},
+                  ].map(f=>(
+                    <div key={f.key} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#2a2a2a",borderRadius:10,padding:"10px 14px",marginBottom:8}}>
+                      <div>
+                        <div style={{fontSize:11,color:"#888"}}>{f.label}</div>
+                        <div style={{fontSize:11,color:"#555"}}>{f.base}{f.unit} → <span style={{color:"#C8A96E",fontWeight:700}}>{Math.round((f.base+goalDelta[f.key])*10)/10}{f.unit}</span></div>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <button onClick={()=>setGoalDelta(p=>({...p,[f.key]:Math.round((p[f.key]-f.step)*10)/10}))}
+                          style={{width:30,height:30,borderRadius:8,border:"1px solid #444",background:"#1e1e1e",color:"#E85D3D",fontSize:16,cursor:"pointer"}}>−</button>
+                        <div style={{minWidth:50,textAlign:"center",fontSize:14,fontWeight:700,color:goalDelta[f.key]*f.goodDir>=0?"#6ec87a":"#E85D3D"}}>
+                          {goalDelta[f.key]>0?"+":""}{goalDelta[f.key]}{f.unit}
+                        </div>
+                        <button onClick={()=>setGoalDelta(p=>({...p,[f.key]:Math.round((p[f.key]+f.step)*10)/10}))}
+                          style={{width:30,height:30,borderRadius:8,border:"1px solid #444",background:"#1e1e1e",color:"#6ec87a",fontSize:16,cursor:"pointer"}}>＋</button>
+                      </div>
+                    </div>
+                  ))}
+
+                  <button onClick={confirmGoalDelta} style={{width:"100%",marginTop:10,background:"#C8A96E",color:"#141414",border:"none",borderRadius:8,padding:"12px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                    목표 설정 완료
+                  </button>
+                </>
+              )}
+            </div>
+          ):(
           <div style={{marginBottom:20}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
               <div style={{fontSize:12,color:"#C8A96E",letterSpacing:2,textTransform:"uppercase"}}>내 목표 설정</div>
@@ -1409,15 +1550,33 @@ export default function FitnessTracker(){
                     </div>
                   ))}
                 </div>
-                <div style={{fontSize:11,color:"#555",marginBottom:10,fontWeight:600}}>🎯 목표 수치 입력</div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
-                  {[{key:"muscle",label:"골격근량(kg)",type:"number"},{key:"fatMass",label:"체지방량(kg)",type:"number"},{key:"fatPct",label:"체지방률(%)",type:"number"}].map(f=>(
-                    <div key={f.key}>
-                      <div style={{fontSize:10,color:"#555",marginBottom:4}}>{f.label}</div>
-                      <input type={f.type} value={editGoal[f.key]} onChange={e=>setEditGoal(p=>({...p,[f.key]:e.target.value}))}
-                        style={{width:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"7px 9px",color:"#f0ece4",fontSize:13,boxSizing:"border-box"}}/>
-                    </div>
-                  ))}
+                <div style={{fontSize:11,color:"#555",marginBottom:10,fontWeight:600}}>🎯 목표 수치 (변화량으로 조정)</div>
+                <div style={{marginBottom:14}}>
+                  {[
+                    {key:"muscle",label:"골격근량",unit:"kg",base:parseFloat(editBase.muscle)||baseInbody.muscle,step:0.5,goodDir:1},
+                    {key:"fatMass",label:"체지방량",unit:"kg",base:parseFloat(editBase.fatMass)||baseInbody.fatMass,step:0.5,goodDir:-1},
+                    {key:"fatPct",label:"체지방률",unit:"%",base:parseFloat(editBase.fatPct)||baseInbody.fatPct,step:0.5,goodDir:-1},
+                  ].map(f=>{
+                    const currentGoal=parseFloat(editGoal[f.key]);
+                    const delta=Math.round(((isNaN(currentGoal)?f.base:currentGoal)-f.base)*10)/10;
+                    return(
+                      <div key={f.key} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#2a2a2a",borderRadius:10,padding:"8px 12px",marginBottom:6}}>
+                        <div>
+                          <div style={{fontSize:10,color:"#888"}}>{f.label}</div>
+                          <div style={{fontSize:10,color:"#555"}}>{f.base}{f.unit} → <span style={{color:"#C8A96E",fontWeight:700}}>{Math.round((f.base+delta)*10)/10}{f.unit}</span></div>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <button onClick={()=>setEditGoal(p=>({...p,[f.key]:Math.round((f.base+delta-f.step)*10)/10}))}
+                            style={{width:26,height:26,borderRadius:7,border:"1px solid #444",background:"#1e1e1e",color:"#E85D3D",fontSize:14,cursor:"pointer"}}>−</button>
+                          <div style={{minWidth:42,textAlign:"center",fontSize:12,fontWeight:700,color:delta*f.goodDir>=0?"#6ec87a":"#E85D3D"}}>
+                            {delta>0?"+":""}{delta}{f.unit}
+                          </div>
+                          <button onClick={()=>setEditGoal(p=>({...p,[f.key]:Math.round((f.base+delta+f.step)*10)/10}))}
+                            style={{width:26,height:26,borderRadius:7,border:"1px solid #444",background:"#1e1e1e",color:"#6ec87a",fontSize:14,cursor:"pointer"}}>＋</button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={()=>{
@@ -1438,6 +1597,7 @@ export default function FitnessTracker(){
               </div>
             )}
           </div>
+          )}
 
           <div style={{marginBottom:20}}>
             <div style={{fontSize:12,color:"#C8A96E",letterSpacing:2,marginBottom:12,textTransform:"uppercase"}}>변동 그래프</div>
