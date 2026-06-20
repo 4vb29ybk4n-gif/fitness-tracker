@@ -538,12 +538,15 @@ export default function FitnessTracker(){
     const code=groupInput.trim().toUpperCase();
     const nick=nicknameInput.trim();
     if(myGroups.some(g=>g.code===code)){ flash("이미 가입된 그룹이에요"); return; }
+    const exists=await loadData("shared_group_meta",code+"_exists",false);
+    if(exists){ flash("이미 존재하는 그룹 코드예요"); return; }
     const nextGroups=[...myGroups,{code,joinedAt:Date.now()}];
     setNickname(nick);
     await saveData(userId,"nickname",nick);
     await persistMyGroups(nextGroups);
     setActiveGroupCode(code);
     await saveData(userId,"activeGroupCode",code);
+    await saveData("shared_group_meta",code+"_exists",true);
     if(groupEndInput){
       await saveData("shared_group_meta",code+"_endDate",groupEndInput);
     }
@@ -552,12 +555,20 @@ export default function FitnessTracker(){
     flash("새 그룹 생성 완료 ✓");
   }
 
-  // 기존 그룹 참여: 코드만 입력하면 그 그룹의 기존 설정(종료일)을 그대로 따름
+  // 기존 그룹 참여: 코드 존재 여부를 먼저 확인하고, 없으면 새로 만들지 물어봄
   async function joinGroup(){
     if(!groupInput.trim()||!nicknameInput.trim()) return;
     const code=groupInput.trim().toUpperCase();
     const nick=nicknameInput.trim();
     if(myGroups.some(g=>g.code===code)){ flash("이미 가입된 그룹이에요"); return; }
+    const exists=await loadData("shared_group_meta",code+"_exists",false);
+    if(!exists){
+      const confirmCreate=window.confirm(`"${code}" 그룹을 찾을 수 없어요. 코드를 다시 확인해주세요.\n\n혹시 새로 만들고 싶으시면 확인을 눌러주세요.`);
+      if(confirmCreate){
+        await createGroup();
+      }
+      return;
+    }
     const nextGroups=[...myGroups,{code,joinedAt:Date.now()}];
     setNickname(nick);
     await saveData(userId,"nickname",nick);
@@ -575,6 +586,8 @@ export default function FitnessTracker(){
   }
 
   async function leaveGroup(code){
+    const ok=window.confirm(`정말 "${code}" 그룹을 나가시겠어요?\n랭킹 기록에서 제외돼요.`);
+    if(!ok) return;
     await saveData(userId,"group_"+code+"_"+userId,null);
     const nextGroups=myGroups.filter(g=>g.code!==code);
     await persistMyGroups(nextGroups);
@@ -585,6 +598,7 @@ export default function FitnessTracker(){
       setGroupMembers([]);
       setGroupEndDate("");
     }
+    flash("그룹에서 나갔어요");
   }
 
   async function saveGroupEndDate(){
@@ -596,9 +610,10 @@ export default function FitnessTracker(){
   }
 
   async function shareGroup(){
-    const shareText=`"${activeGroupCode}" 그룹에서 같이 운동해요! 피트니스 트래커 앱에서 그룹 코드 "${activeGroupCode}"를 입력하고 참여하세요 💪`;
+    const appUrl=window.location.origin;
+    const shareText=`"${activeGroupCode}" 그룹에서 같이 운동해요! 아래 링크 접속 후, 그룹 코드 "${activeGroupCode}"를 입력하고 참여하세요 💪\n${appUrl}`;
     if(navigator.share){
-      try{ await navigator.share({title:"운동 그룹 초대",text:shareText}); }
+      try{ await navigator.share({title:"운동 그룹 초대",text:shareText,url:appUrl}); }
       catch(e){ /* 사용자가 취소한 경우 무시 */ }
     }else if(navigator.clipboard){
       try{ await navigator.clipboard.writeText(shareText); flash("초대 문구 복사됨 ✓"); }
