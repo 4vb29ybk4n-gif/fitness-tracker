@@ -47,15 +47,16 @@ const DEFAULT_CATEGORIES = [
     ]},
   { id:"pilates", label:"🩰 필라테스", color:"#6ec87a", bg:"#1e2a1e",
     items:[
-      {id:"reformer",    name:"리포머",       type:"minutes", defaults:{mins:50}},
-      {id:"cadillac",    name:"캐딜락",       type:"minutes", defaults:{mins:50}},
-      {id:"barrel",      name:"배럴",         type:"minutes", defaults:{mins:50}},
-      {id:"chair",       name:"체어",         type:"minutes", defaults:{mins:50}},
-      {id:"mat_pilates", name:"매트 필라테스", type:"minutes", defaults:{mins:50}},
-      {id:"barre",       name:"바레 클래스",  type:"minutes", defaults:{mins:50}},
+      {id:"reformer",    name:"리포머",       type:"minutes", defaults:{mins:25}},
+      {id:"cadillac",    name:"캐딜락",       type:"minutes", defaults:{mins:25}},
+      {id:"barrel",      name:"배럴",         type:"minutes", defaults:{mins:25}},
+      {id:"chair",       name:"체어",         type:"minutes", defaults:{mins:25}},
+      {id:"mat_pilates", name:"매트 필라테스", type:"minutes", defaults:{mins:25}},
+      {id:"barre",       name:"바레 클래스",  type:"minutes", defaults:{mins:25}},
     ]},
   { id:"cardio", label:"🔥 유산소", color:"#E85D3D", bg:"#2a1e1a",
     items:[
+      {id:"running",    name:"달리기",    type:"cardio",      defaults:{mins:30,km:10}},
       {id:"treadmill",  name:"트레드밀",  type:"cardio",      defaults:{mins:20,km:2}},
       {id:"walk",       name:"빠른 걷기", type:"cardio",      defaults:{mins:30,km:2}},
       {id:"bike",       name:"사이클",   type:"cardio_kcal", defaults:{mins:30,kcal:200}},
@@ -450,6 +451,12 @@ export default function FitnessTracker(){
     const dl=workoutLog[dateStr]; if(!dl) return 0;
     return Object.values(dl.checks||{}).filter(Boolean).length;
   }
+
+  function isDayActive(dateStr){
+    const dl=workoutLog[dateStr]; if(!dl) return false;
+    if(dl.catDone&&Object.values(dl.catDone).some(Boolean)) return true;
+    return getDayCheckedCount(dateStr)>0;
+  }
   
 
   function hasCatActivity(dateStr,catId){
@@ -479,7 +486,7 @@ export default function FitnessTracker(){
 
   const totalWorkoutDays=Object.keys(workoutLog).filter(k=>{
     const d=toMidnight(new Date(k+"T00:00:00"));
-    return d>=START_DATE&&d<=END_DATE&&getDayCheckedCount(k)>0;
+    return d>=START_DATE&&d<=END_DATE&&isDayActive(k);
   }).length;
   const progressPct=Math.min(100,Math.round((totalWorkoutDays/totalDays)*100));
 
@@ -972,12 +979,8 @@ export default function FitnessTracker(){
             const dayKcal=getDayKcal(calSelected);
             return(
               <div style={{marginTop:16,padding:16,background:"#1e1e1e",borderRadius:14,border:"1px solid #2a2a2a"}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+                <div style={{marginBottom:14}}>
                   <span style={{fontSize:13,fontWeight:600,color:"#f0ece4"}}>{calSelected}</span>
-                  <button onClick={()=>{setWorkoutDate(calSelected);setTab("workout");}}
-                    style={{background:"#C8A96E",color:"#141414",border:"none",borderRadius:8,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>
-                    상세 기록 →
-                  </button>
                 </div>
                 {dayKcal>0&&(
                   <div style={{marginBottom:12,padding:"8px 12px",background:"#2a1e1a",borderRadius:8,fontSize:12,color:"#E85D3D",fontWeight:600,textAlign:"center"}}>
@@ -1046,7 +1049,7 @@ export default function FitnessTracker(){
                     border:isSel?"none":"1px solid #2a2a2a",borderRadius:10,padding:"8px 10px",cursor:"pointer",minWidth:60,textAlign:"center",
                   }}>
                     <div style={{fontSize:10,color:isSel?"#141414":"#666",marginBottom:2}}>{fmtShort(ds)}</div>
-                    <div style={{fontSize:12,color:isSel?"#141414":getDayCheckedCount(ds)>0?"#C8A96E":"#444"}}>{getDayCheckedCount(ds)>0?"✓":"—"}</div>
+                    <div style={{fontSize:12,color:isSel?"#141414":isDayActive(ds)?"#C8A96E":"#444"}}>{isDayActive(ds)?"✓":"—"}</div>
                   </button>
                 );
               })}
