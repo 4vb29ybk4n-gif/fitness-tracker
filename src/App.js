@@ -183,7 +183,7 @@ export default function FitnessTracker(){
   const [workoutLog,setWorkoutLog]       = useState({});
   const [categories,setCategories]       = useState(DEFAULT_CATEGORIES);
   const [inbodyLogs,setInbodyLogs]       = useState([INITIAL_INBODY]);
-  const [expandedCat,setExpandedCat]     = useState({gym:true,pilates:true,cardio:false});
+  const [expandedCat,setExpandedCat]     = useState({gym:false,pilates:false,cardio:false});
   const [openItem,setOpenItem]           = useState(null);
   const [newInbody,setNewInbody]         = useState({date:todayStr,weight:"",muscle:"",fatMass:"",fatPct:"",score:""});
   const [showInbodyForm,setShowInbodyForm] = useState(false);
@@ -835,6 +835,16 @@ export default function FitnessTracker(){
           </div>
         </div>
       )}
+    </div>
+
+    {/* 푸터 */}
+    <div style={{background:"#0a0a0a",borderTop:"1px solid #2a2a2a",padding:"20px 16px",textAlign:"center",marginTop:20}}>
+      <div style={{fontSize:10,color:"#555",lineHeight:1.8}}>
+        <div>Made with 💪 by 지큐</div>
+        <div style={{marginTop:8}}>비상업적 개인용도만 허용</div>
+        <div style={{marginTop:4,color:"#444"}}>© 2026 All rights reserved</div>
+      </div>
+    </div>
     </div>
   );
 }
