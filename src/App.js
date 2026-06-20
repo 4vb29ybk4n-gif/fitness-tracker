@@ -66,8 +66,38 @@ const DEFAULT_CATEGORIES = [
 
 const GOALS = {weight:56.4, muscle:25.5, fatMass:11.3, fatPct:20.0};
 const INITIAL_INBODY = {date:"2026-06-15",weight:56.4,muscle:23.5,fatMass:13.3,fatPct:23.5,score:74};
+const CAT_COLOR_PALETTE = ["#8E7CC3","#5DADE2","#F4D03F","#48C9B0","#EC7063","#AF7AC5","#52BE80"];
+const CAT_EMOJI_OPTIONS = ["⭐","🧘","🤸","🚴","🏃","🥊","🏊","⛹️","🤾","🎯"];
 
 function snap(arr,x){ if(arr.includes(x)) return x; return arr.reduce((a,b)=>Math.abs(b-x)<Math.abs(a-x)?b:a); }
+
+// ── 칼로리 추정 (체중 56kg 기준 MET 근사치) ──────────
+const BODY_WEIGHT_KG = 56;
+function estimateKcal(type,val){
+  if(!val) return 0;
+  if(type==="weight"){
+    // 근력운동: 세트당 약 0.15kcal/kg/분, 세트당 약 40초 가정
+    const minutesActive=(val.sets||1)*(40/60);
+    return Math.round(minutesActive*BODY_WEIGHT_KG*0.1);
+  }
+  if(type==="time_set"){
+    const minutesActive=((val.secs||30)*(val.sets||1))/60;
+    return Math.round(minutesActive*BODY_WEIGHT_KG*0.08);
+  }
+  if(type==="minutes"){
+    // 필라테스/맨몸운동 MET ≈ 3.5
+    return Math.round((val.mins||0)*3.5*BODY_WEIGHT_KG/60);
+  }
+  if(type==="cardio"){
+    // 유산소 MET ≈ 7 (속도 비례 보정)
+    const speedFactor=val.km&&val.mins?Math.max(0.7,Math.min(1.6,(val.km/(val.mins/60))/6)):1;
+    return Math.round((val.mins||0)*7*speedFactor*BODY_WEIGHT_KG/60);
+  }
+  if(type==="cardio_kcal"){
+    return Math.round(val.kcal||0);
+  }
+  return 0;
+}
 
 function defaultsForType(type){
   if(type==="weight")      return {weight:20,reps:10,sets:3};
@@ -94,6 +124,52 @@ function ProgressBar({value,color="#C8A96E"}){
     <div style={{background:"#2a2a2a",borderRadius:8,height:8,overflow:"hidden"}}>
       <div style={{width:`${Math.min(100,Math.max(0,value))}%`,height:"100%",background:color,borderRadius:8,transition:"width 0.6s ease"}}/>
     </div>
+  );
+}
+
+// ── 인바디 추이 그래프 (순수 SVG) ──────────────────────
+function InbodyChart({logs,field,unit,color,goalValue}){
+  if(!logs||logs.length<2) return(
+    <div style={{fontSize:11,color:"#444",textAlign:"center",padding:"24px 0"}}>측정 기록이 2개 이상일 때 그래프가 표시돼요</div>
+  );
+  const W=300,H=140,padL=34,padR=14,padT=16,padB=22;
+  const values=logs.map(l=>l[field]);
+  const allVals=goalValue!=null?[...values,goalValue]:values;
+  const minV=Math.min(...allVals), maxV=Math.max(...allVals);
+  const range=maxV-minV||1;
+  const yPad=range*0.15;
+  const yMin=minV-yPad, yMax=maxV+yPad;
+  const xStep=(W-padL-padR)/(logs.length-1);
+  const xAt=i=>padL+i*xStep;
+  const yAt=v=>padT+(H-padT-padB)*(1-(v-yMin)/(yMax-yMin));
+  const points=logs.map((l,i)=>`${xAt(i)},${yAt(l[field])}`).join(" ");
+  const areaPoints=`${padL},${H-padB} ${points} ${xAt(logs.length-1)},${H-padB}`;
+  return(
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"auto",display:"block"}}>
+      <line x1={padL} y1={padT} x2={padL} y2={H-padB} stroke="#2a2a2a" strokeWidth="1"/>
+      <line x1={padL} y1={H-padB} x2={W-padR} y2={H-padB} stroke="#2a2a2a" strokeWidth="1"/>
+      {goalValue!=null&&(
+        <>
+          <line x1={padL} y1={yAt(goalValue)} x2={W-padR} y2={yAt(goalValue)} stroke="#C8A96E" strokeWidth="1" strokeDasharray="4,3" opacity="0.6"/>
+          <text x={W-padR} y={yAt(goalValue)-4} fontSize="8" fill="#C8A96E" textAnchor="end">목표 {goalValue}{unit}</text>
+        </>
+      )}
+      <polygon points={areaPoints} fill={color} opacity="0.12"/>
+      <polyline points={points} fill="none" stroke={color} strokeWidth="2"/>
+      {logs.map((l,i)=>(
+        <g key={i}>
+          <circle cx={xAt(i)} cy={yAt(l[field])} r={i===logs.length-1?4:3} fill={color}/>
+          {(i===0||i===logs.length-1)&&(
+            <text x={xAt(i)} y={yAt(l[field])-8} fontSize="9" fill="#f0ece4" textAnchor="middle" fontWeight="700">{l[field]}{unit}</text>
+          )}
+        </g>
+      ))}
+      {logs.map((l,i)=>(
+        (i===0||i===logs.length-1||logs.length<=4)&&(
+          <text key={"d"+i} x={xAt(i)} y={H-padB+14} fontSize="8" fill="#555" textAnchor="middle">{l.date.slice(5)}</text>
+        )
+      ))}
+    </svg>
   );
 }
 
@@ -195,6 +271,10 @@ export default function FitnessTracker(){
   const [inlineEdit,setInlineEdit]       = useState(null);
   const [newItemName,setNewItemName]     = useState("");
   const [newItemType,setNewItemType]     = useState("weight");
+  const [showCatForm,setShowCatForm]     = useState(false);
+  const [newCatName,setNewCatName]       = useState("");
+  const [newCatEmoji,setNewCatEmoji]     = useState("⭐");
+  const [newCatColor,setNewCatColor]     = useState("#8E7CC3");
   const [loaded,setLoaded]               = useState(false);
   const [saveMsg,setSaveMsg]             = useState("");
   const [workoutDate,setWorkoutDate]     = useState(todayStr);
@@ -301,7 +381,37 @@ export default function FitnessTracker(){
 
   function saveCategories(cats){
     setCategories(cats); persistCats(cats);
-    setExpandedCat(prev=>Object.fromEntries(cats.map(c=>[c.id,prev[c.id]??true])));
+    setExpandedCat(prev=>Object.fromEntries(cats.map(c=>[c.id,prev[c.id]??false])));
+  }
+
+  function addCategory(){
+    if(!newCatName.trim()) return;
+    const newCat={id:"cat_"+Date.now(),label:`${newCatEmoji} ${newCatName.trim()}`,color:newCatColor,bg:"#1e1e1e",items:[]};
+    const next=[...categories,newCat];
+    saveCategories(next);
+    setExpandedCat(prev=>({...prev,[newCat.id]:true}));
+    setNewCatName(""); setNewCatEmoji("⭐"); setNewCatColor("#8E7CC3");
+    setShowCatForm(false);
+  }
+
+  function deleteCategory(catId){
+    const next=categories.filter(c=>c.id!==catId);
+    saveCategories(next);
+  }
+
+  function getDayKcal(dateStr){
+    const dl=workoutLog[dateStr]; if(!dl) return 0;
+    let total=0;
+    categories.forEach(cat=>{
+      cat.items.forEach(it=>{
+        const key=`${cat.id}_${it.id}`;
+        if(dl.checks?.[key]){
+          const val=dl.values?.[key]||it.defaults;
+          total+=estimateKcal(it.type,val);
+        }
+      });
+    });
+    return total;
   }
 
   function handleUserIdSave(newId){
@@ -472,12 +582,22 @@ export default function FitnessTracker(){
               const inRange=isInRange(d);
               const isToday=dateStr===todayStr;
               const isFuture=toMidnight(new Date(year,month,d))>today;
-              const hasGym=hasCatActivity(dateStr,"gym");
-              const hasPilates=hasCatActivity(dateStr,"pilates");
-              const hasCardio=hasCatActivity(dateStr,"cardio");
-              const hasBoth=hasGym&&hasPilates;
-              const hasAny=hasGym||hasPilates||hasCardio;
-              const bg=hasBoth?"linear-gradient(135deg,#C8A96E 50%,#6ec87a 50%)":hasGym?"#C8A96E":hasPilates?"#6ec87a":hasCardio?"#E85D3D":isToday?"#2a2a2a":"transparent";
+              const activeCats=categories.filter(c=>hasCatActivity(dateStr,c.id));
+              const hasAny=activeCats.length>0;
+              let bg;
+              if(activeCats.length>=2){
+                const n=activeCats.length;
+                const stops=activeCats.map((c,ci)=>{
+                  const start=Math.round(ci*100/n);
+                  const end=Math.round((ci+1)*100/n);
+                  return c.color+" "+start+"%, "+c.color+" "+end+"%";
+                });
+                bg="linear-gradient(135deg, "+stops.join(", ")+")";
+              } else if(activeCats.length===1){
+                bg=activeCats[0].color;
+              } else {
+                bg=isToday?"#2a2a2a":"transparent";
+              }
               return(
                 <div key={i} onClick={()=>{if(!inRange||isFuture)return;setCalSelected(calSelected===dateStr?null:dateStr);}} style={{
                   aspectRatio:"1",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
@@ -494,9 +614,7 @@ export default function FitnessTracker(){
           </div>
 
           {calSelected&&(()=>{
-            const hasG=hasCatActivity(calSelected,"gym");
-            const hasP=hasCatActivity(calSelected,"pilates");
-            const hasC=hasCatActivity(calSelected,"cardio");
+            const dayKcal=getDayKcal(calSelected);
             return(
               <div style={{marginTop:16,padding:16,background:"#1e1e1e",borderRadius:14,border:"1px solid #2a2a2a"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
@@ -506,22 +624,30 @@ export default function FitnessTracker(){
                     상세 기록 →
                   </button>
                 </div>
-                <div style={{display:"flex",gap:8}}>
-                  {[{cat:"gym",label:"💪 헬스",has:hasG,color:"#C8A96E"},{cat:"pilates",label:"🩰 필라테스",has:hasP,color:"#6ec87a"},{cat:"cardio",label:"🔥 유산소",has:hasC,color:"#E85D3D"}].map(x=>(
-                    <button key={x.cat} onClick={()=>toggleCatForDate(calSelected,x.cat)} style={{
-                      flex:1,padding:"14px 6px",borderRadius:12,border:"none",cursor:"pointer",
-                      background:x.has?x.color:"#2a2a2a",
-                      textAlign:"center",fontSize:12,fontWeight:700,
-                      color:x.has?"#141414":"#555",
-                      transition:"all 0.15s",
-                      boxShadow:x.has?`0 0 12px ${x.color}44`:"none",
-                    }}>
-                      {x.label}<br/>
-                      <span style={{fontSize:11,fontWeight:500,marginTop:4,display:"block"}}>
-                        {x.has?"✓ 완료":"탭해서 체크"}
-                      </span>
-                    </button>
-                  ))}
+                {dayKcal>0&&(
+                  <div style={{marginBottom:12,padding:"8px 12px",background:"#2a1e1a",borderRadius:8,fontSize:12,color:"#E85D3D",fontWeight:600,textAlign:"center"}}>
+                    🔥 추정 소모 칼로리: {dayKcal} kcal
+                  </div>
+                )}
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {categories.map(cat=>{
+                    const has=hasCatActivity(calSelected,cat.id);
+                    return(
+                      <button key={cat.id} onClick={()=>toggleCatForDate(calSelected,cat.id)} style={{
+                        flex:"1 1 30%",minWidth:90,padding:"14px 6px",borderRadius:12,border:"none",cursor:"pointer",
+                        background:has?cat.color:"#2a2a2a",
+                        textAlign:"center",fontSize:12,fontWeight:700,
+                        color:has?"#141414":"#555",
+                        transition:"all 0.15s",
+                        boxShadow:has?`0 0 12px ${cat.color}44`:"none",
+                      }}>
+                        {cat.label}<br/>
+                        <span style={{fontSize:11,fontWeight:500,marginTop:4,display:"block"}}>
+                          {has?"✓ 완료":"탭해서 체크"}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
                 <div style={{marginTop:10,fontSize:10,color:"#444",textAlign:"center"}}>버튼 탭 → 해당 운동 전체 체크/해제 · 상세 기록에서 세부 조정</div>
               </div>
@@ -530,9 +656,9 @@ export default function FitnessTracker(){
 
           <div style={{marginTop:16,padding:14,background:"#1e1e1e",borderRadius:12,fontSize:11,color:"#555"}}>
             <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-              {[{c:"#C8A96E",l:"💪 헬스"},{c:"#6ec87a",l:"🩰 필라테스"},{c:"#E85D3D",l:"🔥 유산소"}].map((x,i)=>(
+              {categories.map((c,i)=>(
                 <div key={i} style={{display:"flex",alignItems:"center",gap:5}}>
-                  <div style={{width:12,height:12,borderRadius:3,background:x.c}}/><span>{x.l}</span>
+                  <div style={{width:12,height:12,borderRadius:3,background:c.color}}/><span>{c.label}</span>
                 </div>
               ))}
             </div>
@@ -564,8 +690,13 @@ export default function FitnessTracker(){
 
           <div style={{padding:"16px 16px 0"}}>
             <div style={{background:"#1e1e1e",borderRadius:12,border:"1px solid #2a2a2a",padding:"14px 18px",marginBottom:14}}>
-              <div style={{fontSize:16,fontWeight:700}}>{fmtShort(workoutDate)}</div>
-              <div style={{display:"flex",gap:8,marginTop:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                <div style={{fontSize:16,fontWeight:700}}>{fmtShort(workoutDate)}</div>
+                {getDayKcal(workoutDate)>0&&(
+                  <div style={{fontSize:13,color:"#E85D3D",fontWeight:700}}>🔥 {getDayKcal(workoutDate)} kcal</div>
+                )}
+              </div>
+              <div style={{display:"flex",gap:8,marginTop:8,flexWrap:"wrap"}}>
                 {categories.map(cat=>{
                   const done=cat.items.some(it=>dayLog.checks?.[`${cat.id}_${it.id}`]);
                   return <span key={cat.id} style={{fontSize:12,padding:"3px 10px",borderRadius:20,background:done?cat.color:"#2a2a2a",color:done?"#141414":"#555",fontWeight:done?700:400}}>{cat.label.split(" ")[0]} {done?"✓":"—"}</span>;
@@ -608,7 +739,7 @@ export default function FitnessTracker(){
                               </button>
                               <div onClick={()=>setOpenItem(isExp?null:key)} style={{flex:1,minWidth:0,cursor:"pointer"}}>
                                 <div style={{fontSize:13,fontWeight:checked?600:400,color:checked?"#f0ece4":"#888"}}>{item.name}</div>
-                                {displayVal&&<div style={{fontSize:11,color:cat.color,marginTop:1,fontWeight:600}}>{summaryText(item.type,displayVal)}</div>}
+                                {displayVal&&<div style={{fontSize:11,color:cat.color,marginTop:1,fontWeight:600}}>{summaryText(item.type,displayVal)}{checked?` · 🔥${estimateKcal(item.type,displayVal)}kcal`:""}</div>}
                               </div>
                               <button onClick={()=>setOpenItem(isExp?null:key)}
                                 style={{background:isExp?cat.color:"#2a2a2a",border:"none",borderRadius:6,width:26,height:26,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
@@ -629,7 +760,16 @@ export default function FitnessTracker(){
                     <div style={{padding:"0 12px 12px"}}>
                       {inlineEdit===cat.id?(
                         <div style={{background:"#141414",borderRadius:10,padding:"12px",border:"1px dashed #333"}}>
-                          <div style={{fontSize:11,color:"#555",marginBottom:8}}>항목 관리</div>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                            <div style={{fontSize:11,color:"#555"}}>항목 관리</div>
+                            <button onClick={()=>{
+                              if(window.confirm(`"${cat.label}" 카테고리 전체를 삭제할까요?`)){
+                                deleteCategory(cat.id);
+                              }
+                            }} style={{background:"#3a1a1a",border:"1px solid #5a2a2a",borderRadius:6,color:"#E85D3D",padding:"3px 9px",fontSize:10,cursor:"pointer"}}>
+                              🗑 카테고리 삭제
+                            </button>
+                          </div>
                           <div style={{marginBottom:10}}>
                             {cat.items.map(item=>(
                               <div key={item.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #222"}}>
@@ -675,6 +815,46 @@ export default function FitnessTracker(){
                 </div>
               );
             })}
+
+            {/* 새 카테고리 추가 */}
+            {showCatForm?(
+              <div style={{background:"#1e1e1e",borderRadius:12,border:"1px dashed #444",padding:14,marginBottom:14}}>
+                <div style={{fontSize:12,color:"#888",marginBottom:10,fontWeight:600}}>📁 새 운동 카테고리 추가</div>
+                <input value={newCatName} onChange={e=>setNewCatName(e.target.value)}
+                  placeholder="카테고리 이름 (예: 요가, 복싱...)"
+                  style={{width:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:7,padding:"8px 10px",color:"#f0ece4",fontSize:12,boxSizing:"border-box",marginBottom:8}}/>
+                <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
+                  {CAT_EMOJI_OPTIONS.map(e=>(
+                    <button key={e} onClick={()=>setNewCatEmoji(e)} style={{
+                      width:30,height:30,borderRadius:7,border:newCatEmoji===e?"2px solid #C8A96E":"1px solid #333",
+                      background:"#2a2a2a",fontSize:14,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",padding:0,
+                    }}>{e}</button>
+                  ))}
+                </div>
+                <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+                  {CAT_COLOR_PALETTE.map(c=>(
+                    <button key={c} onClick={()=>setNewCatColor(c)} style={{
+                      width:26,height:26,borderRadius:"50%",border:newCatColor===c?"2px solid #fff":"none",
+                      background:c,cursor:"pointer",padding:0,
+                    }}/>
+                  ))}
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={addCategory} style={{flex:1,background:newCatColor,color:"#141414",border:"none",borderRadius:7,padding:"9px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                    + 카테고리 만들기
+                  </button>
+                  <button onClick={()=>{setShowCatForm(false);setNewCatName("");}}
+                    style={{background:"#2a2a2a",color:"#888",border:"none",borderRadius:7,padding:"9px 14px",fontSize:12,cursor:"pointer"}}>
+                    취소
+                  </button>
+                </div>
+              </div>
+            ):(
+              <button onClick={()=>setShowCatForm(true)}
+                style={{width:"100%",background:"transparent",border:"1px dashed #444",borderRadius:10,padding:"12px",fontSize:12,color:"#666",cursor:"pointer",marginBottom:14}}>
+                📁 ＋ 새 운동 카테고리 만들기 (헬스/필라테스 안 하는 경우)
+              </button>
+            )}
 
             <div style={{background:"#1e1e1e",borderRadius:12,border:"1px solid #2a2a2a",padding:"14px 16px",marginBottom:14}}>
               <div style={{fontSize:12,fontWeight:600,color:"#666",marginBottom:8}}>📝 오늘의 메모 (컨디션·통증·느낀 점)</div>
@@ -769,6 +949,20 @@ export default function FitnessTracker(){
           </div>
 
           <div style={{marginBottom:20}}>
+            <div style={{fontSize:12,color:"#C8A96E",letterSpacing:2,marginBottom:12,textTransform:"uppercase"}}>변동 그래프</div>
+            {[
+              {label:"골격근량",field:"muscle",unit:"kg",color:"#6ec87a",goal:goals.muscle},
+              {label:"체지방량",field:"fatMass",unit:"kg",color:"#E85D3D",goal:goals.fatMass},
+              {label:"체지방률",field:"fatPct",unit:"%",color:"#C8A96E",goal:goals.fatPct},
+            ].map((c,i)=>(
+              <div key={i} style={{marginBottom:14,padding:14,background:"#1e1e1e",borderRadius:12}}>
+                <div style={{fontSize:12,color:"#888",marginBottom:6}}>{c.label}</div>
+                <InbodyChart logs={inbodyLogs} field={c.field} unit={c.unit} color={c.color} goalValue={c.goal}/>
+              </div>
+            ))}
+          </div>
+
+          <div style={{marginBottom:20}}>
             <div style={{fontSize:12,color:"#C8A96E",letterSpacing:2,marginBottom:12,textTransform:"uppercase"}}>목표 달성률</div>
             {[
               {label:"골격근량",current:latest?.muscle,goal:goals.muscle,unit:"kg",progress:muscleProgress},
@@ -835,16 +1029,15 @@ export default function FitnessTracker(){
           </div>
         </div>
       )}
-    </div>
 
-    {/* Footer */}
-    <div style={{background:"#0a0a0a",borderTop:"1px solid #2a2a2a",padding:"20px 16px",textAlign:"center",marginTop:20}}>
-      <div style={{fontSize:10,color:"#555",lineHeight:1.8}}>
-        <div>Made with 💪 by 지큐 sjm2hjm2지메일 </div>
-        <div style={{marginTop:8}}>비상업적 개인용도만 허용</div>
-        <div style={{marginTop:4,color:"#444"}}>© 2026 All rights reserved</div>
+      {/* Footer */}
+      <div style={{background:"#0a0a0a",borderTop:"1px solid #2a2a2a",padding:"20px 16px",textAlign:"center",marginTop:20}}>
+        <div style={{fontSize:10,color:"#555",lineHeight:1.8}}>
+          <div>Made with 💪 by 지큐 (문의: sjm2hjm2@gmail.com)</div>
+          <div style={{marginTop:8}}>비상업적 개인용도만 허용</div>
+          <div style={{marginTop:4,color:"#444"}}>© 2026 All rights reserved</div>
+        </div>
       </div>
-    </div>
     </div>
   );
 }
