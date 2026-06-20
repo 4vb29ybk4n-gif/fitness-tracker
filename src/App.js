@@ -407,16 +407,30 @@ export default function FitnessTracker(){
     const fullText=text.replace(/\n/g," ");
     const found={weight:"",muscle:"",fatMass:"",fatPct:"",score:""};
 
+    // 검사일시가 적힌 줄을 찾아, 그 줄 "이후"부터를 본 검사 결과 영역으로 간주
+    // (히스토리/그래프 섹션은 보통 결과 항목들보다 아래, 또는 별도 표로 나오므로
+    //  같은 키워드가 여러 번 나올 경우 검사일시 근처에서 가장 먼저 매칭되는 값을 우선)
+    let dateLineIdx=lines.findIndex(l=>/검사일시|검사일자|측정일시|Date/i.test(l));
+    if(dateLineIdx===-1) dateLineIdx=0;
+
     function findNumberNear(keywords){
+      // 1차: 검사일시 줄 이후 범위에서 우선 탐색
+      for(let i=dateLineIdx;i<lines.length;i++){
+        for(const kw of keywords){
+          if(lines[i].includes(kw)){
+            const nums=lines[i].match(/\d+\.?\d*/g);
+            const candidate=nums?.find(n=>parseFloat(n)>0);
+            if(candidate) return candidate;
+          }
+        }
+      }
+      // 2차: 못 찾으면 전체 텍스트에서 첫 매칭으로 백업
       for(const line of lines){
         for(const kw of keywords){
           if(line.includes(kw)){
             const nums=line.match(/\d+\.?\d*/g);
-            if(nums&&nums.length){
-              // 키워드 자체에 포함된 숫자(예:체중1) 제거 위해 너무 작은 값(1~2자리 인덱스성 숫자)은 건너뛰는 간단 휴리스틱
-              const candidate=nums.find(n=>parseFloat(n)>0);
-              if(candidate) return candidate;
-            }
+            const candidate=nums?.find(n=>parseFloat(n)>0);
+            if(candidate) return candidate;
           }
         }
       }
@@ -428,6 +442,15 @@ export default function FitnessTracker(){
     found.fatMass=findNumberNear(["체지방량","BFM","Body Fat Mass"]);
     found.fatPct =findNumberNear(["체지방률","PBF","체지방율"]);
     found.score  =findNumberNear(["인바디점수","InBody점수","InBody Score","점수"]);
+
+    // 검사일시 자체를 측정일로 자동 인식 (YYYY.MM.DD 또는 YYYY-MM-DD 패턴)
+    let detectedDate="";
+    const dateMatch=fullText.match(/(20\d{2})[.\-\/](\d{1,2})[.\-\/](\d{1,2})/);
+    if(dateMatch){
+      const y=dateMatch[1], m=dateMatch[2].padStart(2,"0"), d=dateMatch[3].padStart(2,"0");
+      detectedDate=`${y}-${m}-${d}`;
+    }
+    found.date=detectedDate;
 
     // 정규식 백업: 키워드 못 찾으면 전체 텍스트에서 패턴으로 재시도
     if(!found.fatPct){
@@ -454,6 +477,7 @@ export default function FitnessTracker(){
       const parsed=parseInbodyText(text);
       setNewInbody(prev=>({
         ...prev,
+        date:parsed.date||prev.date,
         weight:parsed.weight||prev.weight,
         muscle:parsed.muscle||prev.muscle,
         fatMass:parsed.fatMass||prev.fatMass,
