@@ -413,13 +413,17 @@ export default function FitnessTracker(){
     let dateLineIdx=lines.findIndex(l=>/검사일시|검사일자|측정일시|Date/i.test(l));
     if(dateLineIdx===-1) dateLineIdx=0;
 
-    function findNumberNear(keywords){
+    function findNumberNear(keywords,minVal,maxVal){
+      const isValid=n=>{
+        const v=parseFloat(n);
+        return v>0 && v>=minVal && v<=maxVal && n.length<=5; // 자릿수 과도하게 긴 값(OCR 합쳐짐) 배제
+      };
       // 1차: 검사일시 줄 이후 범위에서 우선 탐색
       for(let i=dateLineIdx;i<lines.length;i++){
         for(const kw of keywords){
           if(lines[i].includes(kw)){
             const nums=lines[i].match(/\d+\.?\d*/g);
-            const candidate=nums?.find(n=>parseFloat(n)>0);
+            const candidate=nums?.find(isValid);
             if(candidate) return candidate;
           }
         }
@@ -429,7 +433,7 @@ export default function FitnessTracker(){
         for(const kw of keywords){
           if(line.includes(kw)){
             const nums=line.match(/\d+\.?\d*/g);
-            const candidate=nums?.find(n=>parseFloat(n)>0);
+            const candidate=nums?.find(isValid);
             if(candidate) return candidate;
           }
         }
@@ -437,11 +441,11 @@ export default function FitnessTracker(){
       return "";
     }
 
-    found.weight =findNumberNear(["체중","Weight"]);
-    found.muscle =findNumberNear(["골격근량","SMM","Skeletal"]);
-    found.fatMass=findNumberNear(["체지방량","BFM","Body Fat Mass"]);
-    found.fatPct =findNumberNear(["체지방률","PBF","체지방율"]);
-    found.score  =findNumberNear(["인바디점수","InBody점수","InBody Score","점수"]);
+    found.weight =findNumberNear(["체중","Weight"],     20,200);
+    found.muscle =findNumberNear(["골격근량","SMM","Skeletal"], 5,80);
+    found.fatMass=findNumberNear(["체지방량","BFM","Body Fat Mass"], 1,80);
+    found.fatPct =findNumberNear(["체지방률","PBF","체지방율"], 1,70);
+    found.score  =findNumberNear(["인바디점수","InBody점수","InBody Score","점수"], 1,100);
 
     // 검사일시 자체를 측정일로 자동 인식 (YYYY.MM.DD 또는 YYYY-MM-DD 패턴)
     let detectedDate="";
@@ -612,9 +616,9 @@ export default function FitnessTracker(){
   const cheerMsg=getCheerMessage(totalWorkoutDays);
 
   const latest=inbodyLogs[inbodyLogs.length-1];
-  const muscleProgress=latest?((latest.muscle-baseInbody.muscle)/(goals.muscle-baseInbody.muscle))*100:0;
-  const fatProgress=latest?((baseInbody.fatMass-latest.fatMass)/(baseInbody.fatMass-goals.fatMass))*100:0;
-  const fatPctProgress=latest?((baseInbody.fatPct-latest.fatPct)/(baseInbody.fatPct-goals.fatPct))*100:0;
+  const muscleProgress=(latest&&(goals.muscle-baseInbody.muscle)!==0)?((latest.muscle-baseInbody.muscle)/(goals.muscle-baseInbody.muscle))*100:0;
+  const fatProgress=(latest&&(baseInbody.fatMass-goals.fatMass)!==0)?((baseInbody.fatMass-latest.fatMass)/(baseInbody.fatMass-goals.fatMass))*100:0;
+  const fatPctProgress=(latest&&(baseInbody.fatPct-goals.fatPct)!==0)?((baseInbody.fatPct-latest.fatPct)/(baseInbody.fatPct-goals.fatPct))*100:0;
 
   const calendarCells=[];
   for(let i=0;i<firstDay;i++) calendarCells.push(null);
