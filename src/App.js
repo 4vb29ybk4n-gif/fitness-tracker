@@ -297,6 +297,7 @@ export default function FitnessTracker(){
   const [groupEndInput,setGroupEndInput] = useState("");
   const [showCreateGroupForm,setShowCreateGroupForm] = useState(false);
   const [showAddGroupForm,setShowAddGroupForm] = useState(false);
+  const [groupCounts,setGroupCounts]     = useState({}); // {code: memberCount}
 
   // ── 클라우드에서 불러오기 ──────────────────────────
   const START_DATE = parseDateStr(dateRange.start);
@@ -377,10 +378,12 @@ export default function FitnessTracker(){
   function saveMemo(dateKey,val){updateDayLog(dateKey,dl=>({...dl,memo:val}));}
 
   function toggleCatForDate(dateKey,catId){
-    // 달력에서는 전체 체크하지 않고, 운동탭으로 이동 + 해당 카테고리 펼치기만 함
+    updateDayLog(dateKey,dl=>{
+      const catDone={...(dl.catDone||{})};
+      catDone[catId]=!catDone[catId];
+      return {...dl,catDone};
+    });
     setExpandedCat(prev=>({...prev,[catId]:true}));
-    setWorkoutDate(dateKey);
-    setTab("workout");
   }
 
   function addInbody(){
@@ -451,6 +454,7 @@ export default function FitnessTracker(){
 
   function hasCatActivity(dateStr,catId){
     const dl=workoutLog[dateStr]; if(!dl) return false;
+    if(dl.catDone?.[catId]) return true;
     const cat=categories.find(c=>c.id===catId);
     return cat?.items.some(it=>dl.checks?.[`${catId}_${it.id}`])||false;
   }
@@ -459,6 +463,17 @@ export default function FitnessTracker(){
     const weekStart=new Date(today); weekStart.setDate(today.getDate()-today.getDay());
     let count=0;
     for(let i=0;i<7;i++){const d=new Date(weekStart);d.setDate(weekStart.getDate()+i);if(hasCatActivity(formatDate(d),catId))count++;}
+    return count;
+  }
+
+  function getWeekTotalDays(){
+    const weekStart=new Date(today); weekStart.setDate(today.getDate()-today.getDay());
+    let count=0;
+    for(let i=0;i<7;i++){
+      const d=new Date(weekStart);d.setDate(weekStart.getDate()+i);
+      const ds=formatDate(d);
+      if(categories.some(cat=>hasCatActivity(ds,cat.id))) count++;
+    }
     return count;
   }
 
@@ -490,16 +505,15 @@ export default function FitnessTracker(){
   for(let d=1;d<=daysInMonth;d++) calendarCells.push(d);
   function isInRange(d){const date=new Date(year,month,d);return date>=START_DATE&&date<=END_DATE;}
 
-  const weekGym=getWeekCount("gym");
-  const weekPilates=getWeekCount("pilates");
+  const weekTotal=getWeekTotalDays();
 
   // ── 그룹 경쟁 동기화 ──────────────────────────────────
   useEffect(()=>{
     if(!activeGroupCode||!nickname) return;
     const myKcal=getDayKcal(todayStr);
-    const payload={nickname,weekGym,weekPilates,todayKcal:myKcal,totalWorkoutDays,updatedAt:Date.now()};
+    const payload={nickname,weekTotal,todayKcal:myKcal,totalWorkoutDays,updatedAt:Date.now()};
     saveData(userId,"group_"+activeGroupCode+"_"+userId,payload);
-  },[activeGroupCode,nickname,weekGym,weekPilates,workoutLog,totalWorkoutDays,userId]);
+  },[activeGroupCode,nickname,weekTotal,workoutLog,totalWorkoutDays,userId]);
 
   async function refreshGroupMembers(){
     if(!activeGroupCode) return;
@@ -513,11 +527,29 @@ export default function FitnessTracker(){
         const members=data.map(row=>({...row.data_value,isMe:row.user_id===userId}))
           .filter(m=>m.nickname);
         setGroupMembers(members);
+        setGroupCounts(prev=>({...prev,[activeGroupCode]:members.length}));
       }
       const endData=await loadData("shared_group_meta",activeGroupCode+"_endDate","");
       setGroupEndDate(endData||"");
     }catch(e){ console.error("group fetch error",e); }
     setGroupLoading(false);
+  }
+
+  async function refreshAllGroupCounts(){
+    if(!myGroups.length) return;
+    const counts={};
+    await Promise.all(myGroups.map(async g=>{
+      try{
+        const { data, error } = await supabase
+          .from("fitness_data")
+          .select("data_value")
+          .like("data_key","group_"+g.code+"_%");
+        if(!error&&data){
+          counts[g.code]=data.filter(row=>row.data_value&&row.data_value.nickname).length;
+        }
+      }catch(e){ /* 무시 */ }
+    }));
+    setGroupCounts(prev=>({...prev,...counts}));
   }
 
   useEffect(()=>{
@@ -526,6 +558,11 @@ export default function FitnessTracker(){
     const interval=setInterval(refreshGroupMembers,15000);
     return ()=>clearInterval(interval);
   },[activeGroupCode]);
+
+  useEffect(()=>{
+    if(!myGroups.length) return;
+    refreshAllGroupCounts();
+  },[myGroups.length,userId]);
 
   async function persistMyGroups(next){
     setMyGroups(next);
@@ -727,7 +764,7 @@ export default function FitnessTracker(){
                       padding:"6px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:700,
                       background:activeGroupCode===g.code?"#C8A96E":"#2a2a2a",
                       color:activeGroupCode===g.code?"#141414":"#888",
-                    }}>{g.code}</button>
+                    }}>{g.code}{groupCounts[g.code]!=null?` · ${groupCounts[g.code]}명`:""}</button>
                   ))}
                   <button onClick={()=>{setShowAddGroupForm(true);setShowCreateGroupForm(false);setGroupInput("");setNicknameInput(nickname);}}
                     style={{padding:"6px 12px",borderRadius:8,border:"1px dashed #444",cursor:"pointer",fontSize:12,color:"#666",background:"transparent"}}>
@@ -786,12 +823,12 @@ export default function FitnessTracker(){
                 ))}
 
                 <div style={{fontSize:11,color:"#C8A96E",letterSpacing:1,margin:"16px 0 8px",fontWeight:700}}>📅 이번주 운동 횟수 랭킹</div>
-                {[...groupMembers].sort((a,b)=>((b.weekGym||0)+(b.weekPilates||0))-((a.weekGym||0)+(a.weekPilates||0))).map((m,i)=>(
+                {[...groupMembers].sort((a,b)=>(b.weekTotal||0)-(a.weekTotal||0)).map((m,i)=>(
                   <div key={"w"+i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:m.isMe?"rgba(200,169,110,0.15)":"transparent",borderRadius:8,marginBottom:2}}>
                     <span style={{fontSize:13,color:m.isMe?"#C8A96E":"#ccc",fontWeight:m.isMe?700:400}}>
                       {i===0?"🥇":i===1?"🥈":i===2?"🥉":`${i+1}.`} {m.nickname}{m.isMe?" (나)":""}
                     </span>
-                    <span style={{fontSize:12,color:"#888"}}>헬스 {m.weekGym||0}회 · 필라테스 {m.weekPilates||0}회</span>
+                    <span style={{fontSize:12,color:"#888"}}>주간 {m.weekTotal||0}회</span>
                   </div>
                 ))}
 
@@ -826,17 +863,17 @@ export default function FitnessTracker(){
 
       {/* 헤더 */}
       <div style={{background:"linear-gradient(135deg,#1a1a1a,#222)",borderBottom:"1px solid #2a2a2a",padding:"36px 20px 20px"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-          <div style={{fontSize:11,letterSpacing:3,color:"#C8A96E",marginBottom:6,textTransform:"uppercase"}}>My Fitness Journey</div>
-          <div style={{display:"flex",gap:6}}>
-            <button onClick={()=>{setEditDateRange(dateRange);setShowDateForm(true);}} style={{background:"#2a2a2a",border:"1px solid #333",borderRadius:8,color:"#888",padding:"5px 10px",fontSize:10,cursor:"pointer"}}>
-              📅 기간 수정
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontSize:11,letterSpacing:3,color:"#C8A96E",textTransform:"uppercase"}}>My Fitness Journey</div>
+          <div style={{display:"flex",gap:5}}>
+            <button onClick={()=>{setEditDateRange(dateRange);setShowDateForm(true);}} title="기간 수정" style={{background:"#2a2a2a",border:"1px solid #333",borderRadius:7,color:"#888",width:30,height:30,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+              📅
             </button>
-            <button onClick={()=>setShowUserIdModal(true)} style={{background:"#2a2a2a",border:"1px solid #333",borderRadius:8,color:"#888",padding:"5px 10px",fontSize:10,cursor:"pointer"}}>
-              🔗 기기 연결
+            <button onClick={()=>setShowUserIdModal(true)} title="기기 연결" style={{background:"#2a2a2a",border:"1px solid #333",borderRadius:7,color:"#888",width:30,height:30,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+              🔗
             </button>
-            <button onClick={()=>{setGroupInput("");setNicknameInput(nickname);setShowGroupModal(true);}} style={{background:activeGroupCode?"#C8A96E":"#2a2a2a",border:"1px solid #333",borderRadius:8,color:activeGroupCode?"#141414":"#888",padding:"5px 10px",fontSize:10,cursor:"pointer",fontWeight:activeGroupCode?700:400}}>
-              🏆 {activeGroupCode?activeGroupCode+(myGroups.length>1?` +${myGroups.length-1}`:""):"그룹 경쟁"}
+            <button onClick={()=>{setGroupInput("");setNicknameInput(nickname);setShowGroupModal(true);}} style={{background:activeGroupCode?"#C8A96E":"#2a2a2a",border:"1px solid #333",borderRadius:7,color:activeGroupCode?"#141414":"#888",padding:"0 10px",height:30,fontSize:11,cursor:"pointer",fontWeight:activeGroupCode?700:400,display:"flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}>
+              🏆 {activeGroupCode?activeGroupCode+(groupCounts[activeGroupCode]?` ${groupCounts[activeGroupCode]}명`:"")+(myGroups.length>1?` +${myGroups.length-1}`:""):"그룹"}
             </button>
           </div>
         </div>
@@ -855,10 +892,9 @@ export default function FitnessTracker(){
       </div>
 
       {/* 통계 */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:1,background:"#222",borderBottom:"1px solid #2a2a2a"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:1,background:"#222",borderBottom:"1px solid #2a2a2a"}}>
         {[
-          {label:"이번주 헬스",    value:`${weekGym}회`,         sub:"목표 3회", color:weekGym>=3?"#6ec87a":"#C8A96E"},
-          {label:"이번주 필라테스", value:`${weekPilates}회`,     sub:"목표 2회", color:weekPilates>=2?"#6ec87a":"#C8A96E"},
+          {label:"이번주 운동",    value:`${weekTotal}회`,         sub:"목표 5회", color:weekTotal>=5?"#6ec87a":"#C8A96E"},
           {label:"누적 운동일",    value:`${totalWorkoutDays}일`, sub:`목표 ${getTotalWeeks(START_DATE,END_DATE)*3}일`, color:"#C8A96E"},
           {label:"오늘 칼로리",    value:`${getDayKcal(todayStr)}`, sub:"kcal", color:getDayKcal(todayStr)>0?"#E85D3D":"#555"},
         ].map((s,i)=>(
@@ -951,32 +987,34 @@ export default function FitnessTracker(){
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                   {categories.map(cat=>{
                     const has=hasCatActivity(calSelected,cat.id);
-                    const isEmpty=cat.items.length===0;
                     return(
-                      <button key={cat.id} onClick={()=>{
-                        if(isEmpty) return;
-                        toggleCatForDate(calSelected,cat.id);
-                      }} style={{
-                        flex:"1 1 30%",minWidth:90,padding:"14px 6px",borderRadius:12,border:"none",cursor:isEmpty?"default":"pointer",
+                      <button key={cat.id} onClick={()=>toggleCatForDate(calSelected,cat.id)} style={{
+                        flex:"1 1 30%",minWidth:90,padding:"14px 6px",borderRadius:12,border:"none",cursor:"pointer",
                         background:has?cat.color:"#2a2a2a",
                         textAlign:"center",fontSize:12,fontWeight:700,
-                        color:has?"#141414":isEmpty?"#3a3a3a":"#555",
+                        color:has?"#141414":"#555",
                         transition:"all 0.15s",
                         boxShadow:has?`0 0 12px ${cat.color}44`:"none",
-                        opacity:isEmpty?0.5:1,
                       }}>
                         {cat.label}<br/>
                         <span style={{fontSize:11,fontWeight:500,marginTop:4,display:"block"}}>
-                          {isEmpty?"⚠ 항목 없음":has?"✓ 진행중":"탭해서 기록"}
+                          {has?"✓ 완료":"탭해서 체크"}
                         </span>
                       </button>
                     );
                   })}
                 </div>
-                <div style={{marginTop:10,fontSize:10,color:"#444",textAlign:"center"}}>버튼 탭 → 운동탭으로 이동, 항목별로 직접 체크/기록</div>
-                {categories.some(c=>c.items.length===0)&&(
-                  <div style={{marginTop:6,fontSize:10,color:"#E85D3D",textAlign:"center"}}>⚠ "항목 없음" 카테고리는 운동 탭에서 항목을 먼저 추가해야 체크/색칠이 가능해요</div>
-                )}
+                <div style={{marginTop:10,fontSize:10,color:"#444",textAlign:"center"}}>버튼 탭 → 색칠만 표시 · 세부 기록은 운동탭에서</div>
+
+                <button onClick={()=>{setWorkoutDate(calSelected);setTab("workout");}}
+                  style={{width:"100%",marginTop:12,background:"#C8A96E",color:"#141414",border:"none",borderRadius:10,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                  📝 상세 기록하러 가기 →
+                </button>
+
+                <button onClick={()=>{setTab("workout");setShowCatForm(true);}}
+                  style={{width:"100%",marginTop:8,background:"transparent",border:"1px dashed #444",borderRadius:10,padding:"10px",fontSize:12,color:"#888",cursor:"pointer"}}>
+                  ＋ 새 운동 카테고리 만들기
+                </button>
               </div>
             );
           })()}
