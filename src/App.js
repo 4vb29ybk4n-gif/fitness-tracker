@@ -286,7 +286,8 @@ export default function FitnessTracker(){
   const [saveMsg,setSaveMsg]             = useState("");
   const [workoutDate,setWorkoutDate]     = useState(todayStr);
   const [nickname,setNickname]           = useState("");
-  const [groupCode,setGroupCode]         = useState("");
+  const [myGroups,setMyGroups]           = useState([]); // [{code, joinedAt}]
+  const [activeGroupCode,setActiveGroupCode] = useState("");
   const [showGroupModal,setShowGroupModal] = useState(false);
   const [groupInput,setGroupInput]       = useState("");
   const [nicknameInput,setNicknameInput] = useState("");
@@ -294,6 +295,8 @@ export default function FitnessTracker(){
   const [groupLoading,setGroupLoading]   = useState(false);
   const [groupEndDate,setGroupEndDate]   = useState("");
   const [groupEndInput,setGroupEndInput] = useState("");
+  const [showCreateGroupForm,setShowCreateGroupForm] = useState(false);
+  const [showAddGroupForm,setShowAddGroupForm] = useState(false);
 
   // ── 클라우드에서 불러오기 ──────────────────────────
   const START_DATE = parseDateStr(dateRange.start);
@@ -308,7 +311,8 @@ export default function FitnessTracker(){
       const b   = await loadData(userId,"baseInbody",INITIAL_INBODY);
       const dr  = await loadData(userId,"dateRange",{start:DEFAULT_START_DATE,end:DEFAULT_END_DATE});
       const nick= await loadData(userId,"nickname","");
-      const grp = await loadData(userId,"groupCode","");
+      const grps= await loadData(userId,"myGroups",[]);
+      const active=await loadData(userId,"activeGroupCode","");
       setWorkoutLog(w||{});
       setInbodyLogs(ib&&ib.length?ib:[INITIAL_INBODY]);
       setCategories(cats&&cats.length?cats:DEFAULT_CATEGORIES);
@@ -316,7 +320,8 @@ export default function FitnessTracker(){
       setBaseInbody(b||INITIAL_INBODY);
       setDateRange(dr&&dr.start&&dr.end?dr:{start:DEFAULT_START_DATE,end:DEFAULT_END_DATE});
       setNickname(nick||"");
-      setGroupCode(grp||"");
+      setMyGroups(grps&&grps.length?grps:[]);
+      setActiveGroupCode(active||(grps&&grps.length?grps[0].code:""));
       setLoaded(true);
     }
     load();
@@ -372,21 +377,10 @@ export default function FitnessTracker(){
   function saveMemo(dateKey,val){updateDayLog(dateKey,dl=>({...dl,memo:val}));}
 
   function toggleCatForDate(dateKey,catId){
-    const cat=categories.find(c=>c.id===catId);
-    if(!cat||cat.items.length===0) return;
-    const dl=workoutLog[dateKey]||{checks:{},values:{},memo:""};
-    const isActive=cat.items.some(it=>dl.checks&&dl.checks[`${catId}_${it.id}`]);
-    updateDayLog(dateKey,prev=>{
-      const newChecks={...(prev.checks||{})};
-      const newValues={...(prev.values||{})};
-      cat.items.forEach(it=>{
-        const key=`${catId}_${it.id}`;
-        if(isActive){newChecks[key]=false;}
-        else{newChecks[key]=true;if(!newValues[key])newValues[key]={...it.defaults};}
-      });
-      return {...prev,checks:newChecks,values:newValues};
-    });
+    // 달력에서는 전체 체크하지 않고, 운동탭으로 이동 + 해당 카테고리 펼치기만 함
     setExpandedCat(prev=>({...prev,[catId]:true}));
+    setWorkoutDate(dateKey);
+    setTab("workout");
   }
 
   function addInbody(){
@@ -501,65 +495,115 @@ export default function FitnessTracker(){
 
   // ── 그룹 경쟁 동기화 ──────────────────────────────────
   useEffect(()=>{
-    if(!groupCode||!nickname) return;
+    if(!activeGroupCode||!nickname) return;
     const myKcal=getDayKcal(todayStr);
     const payload={nickname,weekGym,weekPilates,todayKcal:myKcal,totalWorkoutDays,updatedAt:Date.now()};
-    saveData(userId,"group_"+groupCode+"_"+userId,payload);
-  },[groupCode,nickname,weekGym,weekPilates,workoutLog,totalWorkoutDays,userId]);
+    saveData(userId,"group_"+activeGroupCode+"_"+userId,payload);
+  },[activeGroupCode,nickname,weekGym,weekPilates,workoutLog,totalWorkoutDays,userId]);
 
   async function refreshGroupMembers(){
-    if(!groupCode) return;
+    if(!activeGroupCode) return;
     setGroupLoading(true);
     try{
       const { data, error } = await supabase
         .from("fitness_data")
         .select("data_value,user_id")
-        .like("data_key","group_"+groupCode+"_%");
+        .like("data_key","group_"+activeGroupCode+"_%");
       if(!error&&data){
         const members=data.map(row=>({...row.data_value,isMe:row.user_id===userId}))
           .filter(m=>m.nickname);
         setGroupMembers(members);
       }
-      const endData=await loadData("shared_group_meta",groupCode+"_endDate","");
+      const endData=await loadData("shared_group_meta",activeGroupCode+"_endDate","");
       setGroupEndDate(endData||"");
     }catch(e){ console.error("group fetch error",e); }
     setGroupLoading(false);
   }
 
   useEffect(()=>{
-    if(!groupCode) return;
+    if(!activeGroupCode) return;
     refreshGroupMembers();
     const interval=setInterval(refreshGroupMembers,15000);
     return ()=>clearInterval(interval);
-  },[groupCode]);
+  },[activeGroupCode]);
 
+  async function persistMyGroups(next){
+    setMyGroups(next);
+    await saveData(userId,"myGroups",next);
+  }
+
+  // 새 그룹 만들기: 코드를 직접 정하고, 종료일도 같이 세팅 (그룹 기본값)
+  async function createGroup(){
+    if(!groupInput.trim()||!nicknameInput.trim()) return;
+    const code=groupInput.trim().toUpperCase();
+    const nick=nicknameInput.trim();
+    if(myGroups.some(g=>g.code===code)){ flash("이미 가입된 그룹이에요"); return; }
+    const nextGroups=[...myGroups,{code,joinedAt:Date.now()}];
+    setNickname(nick);
+    await saveData(userId,"nickname",nick);
+    await persistMyGroups(nextGroups);
+    setActiveGroupCode(code);
+    await saveData(userId,"activeGroupCode",code);
+    if(groupEndInput){
+      await saveData("shared_group_meta",code+"_endDate",groupEndInput);
+    }
+    setShowGroupModal(false); setShowCreateGroupForm(false); setShowAddGroupForm(false);
+    setGroupInput(""); setNicknameInput(""); setGroupEndInput("");
+    flash("새 그룹 생성 완료 ✓");
+  }
+
+  // 기존 그룹 참여: 코드만 입력하면 그 그룹의 기존 설정(종료일)을 그대로 따름
   async function joinGroup(){
     if(!groupInput.trim()||!nicknameInput.trim()) return;
     const code=groupInput.trim().toUpperCase();
     const nick=nicknameInput.trim();
-    setGroupCode(code);
+    if(myGroups.some(g=>g.code===code)){ flash("이미 가입된 그룹이에요"); return; }
+    const nextGroups=[...myGroups,{code,joinedAt:Date.now()}];
     setNickname(nick);
-    await saveData(userId,"groupCode",code);
     await saveData(userId,"nickname",nick);
-    setShowGroupModal(false);
+    await persistMyGroups(nextGroups);
+    setActiveGroupCode(code);
+    await saveData(userId,"activeGroupCode",code);
+    setShowGroupModal(false); setShowAddGroupForm(false);
     setGroupInput(""); setNicknameInput("");
     flash("그룹 참여 완료 ✓");
   }
 
-  async function leaveGroup(){
-    await saveData(userId,"group_"+groupCode+"_"+userId,null);
-    setGroupCode("");
-    await saveData(userId,"groupCode","");
-    setGroupMembers([]);
-    setGroupEndDate("");
+  async function switchActiveGroup(code){
+    setActiveGroupCode(code);
+    await saveData(userId,"activeGroupCode",code);
+  }
+
+  async function leaveGroup(code){
+    await saveData(userId,"group_"+code+"_"+userId,null);
+    const nextGroups=myGroups.filter(g=>g.code!==code);
+    await persistMyGroups(nextGroups);
+    if(activeGroupCode===code){
+      const nextActive=nextGroups.length?nextGroups[0].code:"";
+      setActiveGroupCode(nextActive);
+      await saveData(userId,"activeGroupCode",nextActive);
+      setGroupMembers([]);
+      setGroupEndDate("");
+    }
   }
 
   async function saveGroupEndDate(){
-    if(!groupEndInput) return;
-    await saveData("shared_group_meta",groupCode+"_endDate",groupEndInput);
+    if(!groupEndInput||!activeGroupCode) return;
+    await saveData("shared_group_meta",activeGroupCode+"_endDate",groupEndInput);
     setGroupEndDate(groupEndInput);
     setGroupEndInput("");
     flash("목표 기간 설정 완료 ✓");
+  }
+
+  async function shareGroup(){
+    const shareText=`"${activeGroupCode}" 그룹에서 같이 운동해요! 피트니스 트래커 앱에서 그룹 코드 "${activeGroupCode}"를 입력하고 참여하세요 💪`;
+    if(navigator.share){
+      try{ await navigator.share({title:"운동 그룹 초대",text:shareText}); }
+      catch(e){ /* 사용자가 취소한 경우 무시 */ }
+    }else if(navigator.clipboard){
+      try{ await navigator.clipboard.writeText(shareText); flash("초대 문구 복사됨 ✓"); }
+      catch(e){ flash("복사 실패"); }
+    }
   }
 
   const weekDates=Array.from({length:7},(_,i)=>{const d=new Date(today);d.setDate(d.getDate()-3+i);return formatDate(d);});
@@ -615,33 +659,65 @@ export default function FitnessTracker(){
           <div style={{width:"100%",maxWidth:360,background:"#1a1a1a",borderRadius:16,padding:20,maxHeight:"80vh",overflowY:"auto"}}>
             <div style={{fontSize:15,fontWeight:700,marginBottom:4,color:"#f0ece4"}}>🏆 그룹 경쟁</div>
             <div style={{fontSize:11,color:"#666",marginBottom:16,lineHeight:1.6}}>
-              친구와 같은 그룹 코드를 입력하면 서로의 주간 운동 횟수와 오늘 칼로리를 비교할 수 있어요.
+              친구와 같은 그룹 코드로 모이면 서로의 주간 운동 횟수와 칼로리를 비교할 수 있어요.
             </div>
 
-            {!groupCode?(
+            {(myGroups.length===0||showAddGroupForm)?(
               <>
+                <div style={{display:"flex",gap:6,marginBottom:14}}>
+                  <button onClick={()=>setShowCreateGroupForm(false)} style={{flex:1,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",background:!showCreateGroupForm?"#C8A96E":"#2a2a2a",color:!showCreateGroupForm?"#141414":"#888",fontWeight:!showCreateGroupForm?700:400,fontSize:12}}>기존 그룹 참여</button>
+                  <button onClick={()=>setShowCreateGroupForm(true)} style={{flex:1,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",background:showCreateGroupForm?"#C8A96E":"#2a2a2a",color:showCreateGroupForm?"#141414":"#888",fontWeight:showCreateGroupForm?700:400,fontSize:12}}>새 그룹 만들기</button>
+                </div>
                 <div style={{marginBottom:10}}>
                   <div style={{fontSize:11,color:"#888",marginBottom:6}}>닉네임</div>
                   <input value={nicknameInput} onChange={e=>setNicknameInput(e.target.value)}
                     placeholder="예: 지큐" maxLength={10}
                     style={{width:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"10px",color:"#f0ece4",fontSize:14,boxSizing:"border-box"}}/>
                 </div>
-                <div style={{marginBottom:18}}>
-                  <div style={{fontSize:11,color:"#888",marginBottom:6}}>그룹 코드 (친구와 동일하게)</div>
+                <div style={{marginBottom:showCreateGroupForm?12:18}}>
+                  <div style={{fontSize:11,color:"#888",marginBottom:6}}>{showCreateGroupForm?"새 그룹 코드 (직접 정하기)":"그룹 코드 (친구와 동일하게)"}</div>
                   <input value={groupInput} onChange={e=>setGroupInput(e.target.value.toUpperCase())}
                     placeholder="예: A그룹 또는 ABC123" maxLength={12}
                     style={{width:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"10px",color:"#C8A96E",fontSize:14,fontWeight:700,boxSizing:"border-box",textAlign:"center"}}/>
                 </div>
+                {showCreateGroupForm&&(
+                  <div style={{marginBottom:18}}>
+                    <div style={{fontSize:11,color:"#888",marginBottom:6}}>목표 종료일 (그룹 기본 설정, 선택)</div>
+                    <input type="date" value={groupEndInput} onChange={e=>setGroupEndInput(e.target.value)}
+                      style={{width:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"10px",color:"#f0ece4",fontSize:13,boxSizing:"border-box"}}/>
+                    <div style={{fontSize:10,color:"#555",marginTop:4}}>여기서 설정한 종료일이 그룹의 기본값이 되어, 나중에 참여하는 친구들도 똑같이 적용돼요.</div>
+                  </div>
+                )}
                 <div style={{display:"flex",gap:8}}>
-                  <button onClick={joinGroup} style={{flex:1,background:"#C8A96E",color:"#141414",border:"none",borderRadius:8,padding:"12px",fontSize:13,fontWeight:700,cursor:"pointer"}}>참여하기</button>
-                  <button onClick={()=>setShowGroupModal(false)} style={{background:"#2a2a2a",color:"#888",border:"none",borderRadius:8,padding:"12px 16px",fontSize:13,cursor:"pointer"}}>취소</button>
+                  <button onClick={showCreateGroupForm?createGroup:joinGroup} style={{flex:1,background:"#C8A96E",color:"#141414",border:"none",borderRadius:8,padding:"12px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                    {showCreateGroupForm?"그룹 만들기":"참여하기"}
+                  </button>
+                  <button onClick={()=>{
+                    if(myGroups.length>0){ setShowAddGroupForm(false); }
+                    else{ setShowGroupModal(false); }
+                  }} style={{background:"#2a2a2a",color:"#888",border:"none",borderRadius:8,padding:"12px 16px",fontSize:13,cursor:"pointer"}}>취소</button>
                 </div>
               </>
             ):(
               <>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,padding:"8px 12px",background:"#2a2a2a",borderRadius:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,padding:"8px 12px",background:"#2a2a2a",borderRadius:8}}>
                   <span style={{fontSize:12,color:"#888"}}>내 닉네임: <b style={{color:"#f0ece4"}}>{nickname}</b></span>
                   <button onClick={refreshGroupMembers} style={{background:"none",border:"none",color:"#C8A96E",fontSize:11,cursor:"pointer"}}>🔄 새로고침</button>
+                </div>
+
+                {/* 그룹 전환 탭 */}
+                <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
+                  {myGroups.map(g=>(
+                    <button key={g.code} onClick={()=>switchActiveGroup(g.code)} style={{
+                      padding:"6px 12px",borderRadius:8,border:"none",cursor:"pointer",fontSize:12,fontWeight:700,
+                      background:activeGroupCode===g.code?"#C8A96E":"#2a2a2a",
+                      color:activeGroupCode===g.code?"#141414":"#888",
+                    }}>{g.code}</button>
+                  ))}
+                  <button onClick={()=>{setShowAddGroupForm(true);setShowCreateGroupForm(false);setGroupInput("");setNicknameInput(nickname);}}
+                    style={{padding:"6px 12px",borderRadius:8,border:"1px dashed #444",cursor:"pointer",fontSize:12,color:"#666",background:"transparent"}}>
+                    ＋ 다른 그룹
+                  </button>
                 </div>
 
                 {/* 목표 기간 설정 */}
@@ -715,12 +791,16 @@ export default function FitnessTracker(){
                 ))}
 
                 {groupMembers.length<=1&&(
-                  <div style={{fontSize:11,color:"#555",textAlign:"center",padding:"16px 0"}}>아직 그룹에 친구가 없어요. 그룹 코드 <b style={{color:"#C8A96E"}}>{groupCode}</b>를 친구에게 공유해보세요!</div>
+                  <div style={{fontSize:11,color:"#555",textAlign:"center",padding:"16px 0"}}>아직 그룹에 친구가 없어요. 아래 공유 버튼으로 초대해보세요!</div>
                 )}
                 {groupLoading&&<div style={{fontSize:10,color:"#444",textAlign:"center",marginTop:8}}>불러오는 중...</div>}
 
-                <div style={{display:"flex",gap:8,marginTop:18}}>
-                  <button onClick={leaveGroup} style={{background:"#3a1a1a",border:"1px solid #5a2a2a",color:"#E85D3D",borderRadius:8,padding:"10px 14px",fontSize:12,cursor:"pointer"}}>그룹 나가기</button>
+                <button onClick={shareGroup} style={{width:"100%",marginTop:14,background:"#2a2a2a",border:"1px solid #C8A96E",color:"#C8A96E",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+                  📤 "{activeGroupCode}" 그룹 친구 초대 공유하기
+                </button>
+
+                <div style={{display:"flex",gap:8,marginTop:10}}>
+                  <button onClick={()=>leaveGroup(activeGroupCode)} style={{background:"#3a1a1a",border:"1px solid #5a2a2a",color:"#E85D3D",borderRadius:8,padding:"10px 14px",fontSize:12,cursor:"pointer"}}>이 그룹 나가기</button>
                   <button onClick={()=>setShowGroupModal(false)} style={{flex:1,background:"#2a2a2a",color:"#888",border:"none",borderRadius:8,padding:"10px",fontSize:13,cursor:"pointer"}}>닫기</button>
                 </div>
               </>
@@ -740,8 +820,8 @@ export default function FitnessTracker(){
             <button onClick={()=>setShowUserIdModal(true)} style={{background:"#2a2a2a",border:"1px solid #333",borderRadius:8,color:"#888",padding:"5px 10px",fontSize:10,cursor:"pointer"}}>
               🔗 기기 연결
             </button>
-            <button onClick={()=>{setGroupInput(groupCode);setNicknameInput(nickname);setShowGroupModal(true);}} style={{background:groupCode?"#C8A96E":"#2a2a2a",border:"1px solid #333",borderRadius:8,color:groupCode?"#141414":"#888",padding:"5px 10px",fontSize:10,cursor:"pointer",fontWeight:groupCode?700:400}}>
-              🏆 {groupCode?groupCode:"그룹 경쟁"}
+            <button onClick={()=>{setGroupInput("");setNicknameInput(nickname);setShowGroupModal(true);}} style={{background:activeGroupCode?"#C8A96E":"#2a2a2a",border:"1px solid #333",borderRadius:8,color:activeGroupCode?"#141414":"#888",padding:"5px 10px",fontSize:10,cursor:"pointer",fontWeight:activeGroupCode?700:400}}>
+              🏆 {activeGroupCode?activeGroupCode+(myGroups.length>1?` +${myGroups.length-1}`:""):"그룹 경쟁"}
             </button>
           </div>
         </div>
@@ -872,13 +952,13 @@ export default function FitnessTracker(){
                       }}>
                         {cat.label}<br/>
                         <span style={{fontSize:11,fontWeight:500,marginTop:4,display:"block"}}>
-                          {isEmpty?"⚠ 항목 없음":has?"✓ 완료":"탭해서 체크"}
+                          {isEmpty?"⚠ 항목 없음":has?"✓ 진행중":"탭해서 기록"}
                         </span>
                       </button>
                     );
                   })}
                 </div>
-                <div style={{marginTop:10,fontSize:10,color:"#444",textAlign:"center"}}>버튼 탭 → 해당 운동 전체 체크/해제 · 상세 기록에서 세부 조정</div>
+                <div style={{marginTop:10,fontSize:10,color:"#444",textAlign:"center"}}>버튼 탭 → 운동탭으로 이동, 항목별로 직접 체크/기록</div>
                 {categories.some(c=>c.items.length===0)&&(
                   <div style={{marginTop:6,fontSize:10,color:"#E85D3D",textAlign:"center"}}>⚠ "항목 없음" 카테고리는 운동 탭에서 항목을 먼저 추가해야 체크/색칠이 가능해요</div>
                 )}
