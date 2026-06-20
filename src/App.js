@@ -837,7 +837,7 @@ export default function FitnessTracker(){
       )}
     </div>
 
-    {/* 푸터 */}
+   {/* Footer */}
     <div style={{background:"#0a0a0a",borderTop:"1px solid #2a2a2a",padding:"20px 16px",textAlign:"center",marginTop:20}}>
       <div style={{fontSize:10,color:"#555",lineHeight:1.8}}>
         <div>Made with 💪 by 지큐(문의 sjm2hjm2@gmail.com) </div>
