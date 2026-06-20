@@ -1505,7 +1505,8 @@ export default function FitnessTracker(){
                   ↺ 초기화
                 </button>
                 <button onClick={()=>{
-                  setEditGoal({muscle:goals.muscle,fatMass:goals.fatMass,fatPct:goals.fatPct});
+                  const hasRealGoals=goals.muscle||goals.fatMass||goals.fatPct;
+                  setEditGoal(hasRealGoals?{muscle:goals.muscle,fatMass:goals.fatMass,fatPct:goals.fatPct}:{muscle:"",fatMass:"",fatPct:""});
                   setEditBase({date:baseInbody.date,weight:baseInbody.weight,muscle:baseInbody.muscle,fatMass:baseInbody.fatMass,fatPct:baseInbody.fatPct,score:baseInbody.score});
                   setShowGoalForm(!showGoalForm);
                 }} style={{background:showGoalForm?"#444":"#2a2a2a",color:"#C8A96E",border:"1px solid #C8A96E",borderRadius:8,padding:"5px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>
@@ -1580,8 +1581,12 @@ export default function FitnessTracker(){
                 </div>
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={()=>{
-                    const newGoals={muscle:parseFloat(editGoal.muscle)||goals.muscle,fatMass:parseFloat(editGoal.fatMass)||goals.fatMass,fatPct:parseFloat(editGoal.fatPct)||goals.fatPct};
                     const newBase={date:editBase.date||baseInbody.date,weight:parseFloat(editBase.weight)||baseInbody.weight,muscle:parseFloat(editBase.muscle)||baseInbody.muscle,fatMass:parseFloat(editBase.fatMass)||baseInbody.fatMass,fatPct:parseFloat(editBase.fatPct)||baseInbody.fatPct,score:parseInt(editBase.score)||baseInbody.score};
+                    const newGoals={
+                      muscle:editGoal.muscle!==""?parseFloat(editGoal.muscle):newBase.muscle,
+                      fatMass:editGoal.fatMass!==""?parseFloat(editGoal.fatMass):newBase.fatMass,
+                      fatPct:editGoal.fatPct!==""?parseFloat(editGoal.fatPct):newBase.fatPct,
+                    };
                     setGoals(newGoals);
                     setBaseInbody(newBase);
                     persistGoals(newGoals,newBase);
