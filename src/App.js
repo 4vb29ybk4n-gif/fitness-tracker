@@ -24,11 +24,11 @@ const KM_OPTIONS     = [0.5,1,1.5,2,2.5,3,3.5,4,4.5,5,6,7,8,10];
 const KCAL_OPTIONS   = [50,100,150,200,250,300,350,400,500];
 
 const TYPE_OPTIONS = [
+  {value:"minutes",   label:"⏱ 시간(분)만 기록"},
   {value:"weight",    label:"무게×횟수×세트"},
-  {value:"time_set",  label:"시간×세트"},
-  {value:"minutes",   label:"분"},
-  {value:"cardio",    label:"분+km"},
-  {value:"cardio_kcal",label:"분+kcal"},
+  {value:"time_set",  label:"초×세트"},
+  {value:"cardio",    label:"분+km (유산소)"},
+  {value:"cardio_kcal",label:"분+kcal (직접입력)"},
 ];
 
 // ── 기본 카테고리 ──────────────────────────────────────
@@ -270,7 +270,7 @@ export default function FitnessTracker(){
   const [editBase,setEditBase]             = useState({date:"",weight:"",muscle:"",fatMass:"",fatPct:"",score:""});
   const [inlineEdit,setInlineEdit]       = useState(null);
   const [newItemName,setNewItemName]     = useState("");
-  const [newItemType,setNewItemType]     = useState("weight");
+  const [newItemType,setNewItemType]     = useState("minutes");
   const [showCatForm,setShowCatForm]     = useState(false);
   const [newCatName,setNewCatName]       = useState("");
   const [newCatEmoji,setNewCatEmoji]     = useState("⭐");
@@ -352,20 +352,8 @@ export default function FitnessTracker(){
   function saveMemo(dateKey,val){updateDayLog(dateKey,dl=>({...dl,memo:val}));}
 
   function toggleCatForDate(dateKey,catId){
-    const cat=categories.find(c=>c.id===catId);
-    if(!cat) return;
-    const dl=workoutLog[dateKey]||{checks:{},values:{},memo:""};
-    const isActive=cat.items.some(it=>dl.checks&&dl.checks[`${catId}_${it.id}`]);
-    updateDayLog(dateKey,prev=>{
-      const newChecks={...(prev.checks||{})};
-      const newValues={...(prev.values||{})};
-      cat.items.forEach(it=>{
-        const key=`${catId}_${it.id}`;
-        if(isActive){newChecks[key]=false;}
-        else{newChecks[key]=true;if(!newValues[key])newValues[key]={...it.defaults};}
-      });
-      return {...prev,checks:newChecks,values:newValues};
-    });
+    // 달력에서는 체크하지 않고, 운동탭으로 이동 + 해당 카테고리만 펼치기
+    setExpandedCat(prev=>({...prev,[catId]:true}));
   }
 
   function addInbody(){
@@ -452,6 +440,19 @@ export default function FitnessTracker(){
     return d>=START_DATE&&d<=END_DATE&&getDayCheckedCount(k)>0;
   }).length;
   const progressPct=Math.min(100,Math.round((totalWorkoutDays/totalDays)*100));
+
+  function getCheerMessage(days){
+    if(days===0) return "오늘부터 시작해봐요! 💪";
+    if(days<3) return "좋은 시작이에요! 🌱";
+    if(days<7) return "꾸준함이 보여요! 👏";
+    if(days<14) return "벌써 일주일 넘게! 멋져요 🔥";
+    if(days<21) return "습관이 되어가고 있어요! ✨";
+    if(days<30) return "한 달 가까이! 대단해요 🎯";
+    if(days<45) return "이 정도면 진짜 루틴이에요 🏆";
+    return "완전 갓생이에요! 정말 자랑스러워요 👑";
+  }
+  const cheerMsg=getCheerMessage(totalWorkoutDays);
+
   const latest=inbodyLogs[inbodyLogs.length-1];
   const muscleProgress=latest?((latest.muscle-baseInbody.muscle)/(goals.muscle-baseInbody.muscle))*100:0;
   const fatProgress=latest?((baseInbody.fatMass-latest.fatMass)/(baseInbody.fatMass-goals.fatMass))*100:0;
@@ -534,6 +535,9 @@ export default function FitnessTracker(){
           <ProgressBar value={progressPct}/>
         </div>
         <div style={{fontSize:11,color:"#555",marginTop:4}}>D+{Math.max(0,Math.floor((today-START_DATE)/86400000))} · 총 {totalDays}일 중</div>
+        <div style={{marginTop:10,display:"inline-block",background:"rgba(200,169,110,0.12)",border:"1px solid rgba(200,169,110,0.3)",borderRadius:20,padding:"6px 14px",fontSize:12,color:"#C8A96E",fontWeight:600}}>
+          {cheerMsg} · 누적 {totalWorkoutDays}일
+        </div>
       </div>
 
       {/* 통계 */}
@@ -632,24 +636,34 @@ export default function FitnessTracker(){
                 <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                   {categories.map(cat=>{
                     const has=hasCatActivity(calSelected,cat.id);
+                    const isEmpty=cat.items.length===0;
                     return(
-                      <button key={cat.id} onClick={()=>toggleCatForDate(calSelected,cat.id)} style={{
-                        flex:"1 1 30%",minWidth:90,padding:"14px 6px",borderRadius:12,border:"none",cursor:"pointer",
+                      <button key={cat.id} onClick={()=>{
+                        if(isEmpty) return;
+                        toggleCatForDate(calSelected,cat.id);
+                        setWorkoutDate(calSelected);
+                        setTab("workout");
+                      }} style={{
+                        flex:"1 1 30%",minWidth:90,padding:"14px 6px",borderRadius:12,border:"none",cursor:isEmpty?"default":"pointer",
                         background:has?cat.color:"#2a2a2a",
                         textAlign:"center",fontSize:12,fontWeight:700,
-                        color:has?"#141414":"#555",
+                        color:has?"#141414":isEmpty?"#3a3a3a":"#555",
                         transition:"all 0.15s",
                         boxShadow:has?`0 0 12px ${cat.color}44`:"none",
+                        opacity:isEmpty?0.5:1,
                       }}>
                         {cat.label}<br/>
                         <span style={{fontSize:11,fontWeight:500,marginTop:4,display:"block"}}>
-                          {has?"✓ 완료":"탭해서 체크"}
+                          {isEmpty?"⚠ 항목 없음":has?"✓ 진행중":"탭해서 기록"}
                         </span>
                       </button>
                     );
                   })}
                 </div>
-                <div style={{marginTop:10,fontSize:10,color:"#444",textAlign:"center"}}>버튼 탭 → 해당 운동 전체 체크/해제 · 상세 기록에서 세부 조정</div>
+                <div style={{marginTop:10,fontSize:10,color:"#444",textAlign:"center"}}>버튼 탭 → 운동탭으로 이동해 항목별로 기록</div>
+                {categories.some(c=>c.items.length===0)&&(
+                  <div style={{marginTop:6,fontSize:10,color:"#E85D3D",textAlign:"center"}}>⚠ "항목 없음" 카테고리는 운동 탭에서 항목을 먼저 추가해야 체크/색칠이 가능해요</div>
+                )}
               </div>
             );
           })()}
@@ -794,11 +808,11 @@ export default function FitnessTracker(){
                               const newItem={id:"item_"+Date.now(),name:newItemName.trim(),type:newItemType,defaults:defaultsForType(newItemType)};
                               const updated=categories.map(c=>c.id===cat.id?{...c,items:[...c.items,newItem]}:c);
                               saveCategories(updated);
-                              setNewItemName(""); setNewItemType("weight");
+                              setNewItemName(""); setNewItemType("minutes");
                             }} style={{flex:1,background:cat.color,color:"#141414",border:"none",borderRadius:7,padding:"8px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
                               + 추가
                             </button>
-                            <button onClick={()=>{setInlineEdit(null);setNewItemName("");setNewItemType("weight");}}
+                            <button onClick={()=>{setInlineEdit(null);setNewItemName("");setNewItemType("minutes");}}
                               style={{background:"#2a2a2a",color:"#888",border:"none",borderRadius:7,padding:"8px 12px",fontSize:12,cursor:"pointer"}}>
                               닫기
                             </button>
