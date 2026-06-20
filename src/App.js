@@ -321,6 +321,7 @@ export default function FitnessTracker(){
   const [editGoal,setEditGoal]             = useState({muscle:"",fatMass:"",fatPct:""});
   const [editBase,setEditBase]             = useState({date:"",weight:"",muscle:"",fatMass:"",fatPct:"",score:""});
   const [onboardVals,setOnboardVals]       = useState({weight:60,muscle:24,fatMass:15,fatPct:25});
+  const [onboardValsStr,setOnboardValsStr] = useState({weight:"60",muscle:"24",fatMass:"15",fatPct:"25"});
   const [onboardStep,setOnboardStep]       = useState("roller"); // "roller" → "goal"
   const [goalDelta,setGoalDelta]           = useState({muscle:2.0,fatMass:-2.0,fatPct:-3.0});
   const [useManualEntry,setUseManualEntry] = useState(false);
@@ -1432,7 +1433,12 @@ export default function FitnessTracker(){
                   <div style={{fontSize:13,fontWeight:700,color:"#C8A96E",marginBottom:4}}>👋 시작하기 전에, 지금 수치를 입력해주세요</div>
                   <div style={{fontSize:11,color:"#666",marginBottom:14}}>이 수치가 시작 기준점이 되고, 첫 측정 기록으로도 저장돼요. 인바디 결과지가 없으면 대략적으로 골라도 괜찮아요.</div>
 
-                  <button onClick={()=>setUseManualEntry(!useManualEntry)} style={{background:"none",border:"none",color:"#888",fontSize:11,textDecoration:"underline",cursor:"pointer",marginBottom:12,padding:0}}>
+                  <button onClick={()=>{
+                    if(!useManualEntry){
+                      setOnboardValsStr({weight:String(onboardVals.weight),muscle:String(onboardVals.muscle),fatMass:String(onboardVals.fatMass),fatPct:String(onboardVals.fatPct)});
+                    }
+                    setUseManualEntry(!useManualEntry);
+                  }} style={{background:"none",border:"none",color:"#888",fontSize:11,textDecoration:"underline",cursor:"pointer",marginBottom:12,padding:0}}>
                     {useManualEntry?"↺ 롤러로 선택하기":"⌨️ 직접 숫자로 입력하기"}
                   </button>
 
@@ -1452,7 +1458,12 @@ export default function FitnessTracker(){
                       {[{key:"weight",label:"체중(kg)"},{key:"muscle",label:"골격근량(kg)"},{key:"fatMass",label:"체지방량(kg)"},{key:"fatPct",label:"체지방률(%)"}].map(f=>(
                         <div key={f.key}>
                           <div style={{fontSize:10,color:"#555",marginBottom:4}}>{f.label}</div>
-                          <input type="number" value={onboardVals[f.key]} onChange={e=>setOnboardVals(p=>({...p,[f.key]:parseFloat(e.target.value)||0}))}
+                          <input type="number" value={onboardValsStr[f.key]}
+                            onChange={e=>{
+                              const raw=e.target.value;
+                              setOnboardValsStr(p=>({...p,[f.key]:raw}));
+                              setOnboardVals(p=>({...p,[f.key]:raw===""?0:(parseFloat(raw)||0)}));
+                            }}
                             style={{width:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"8px 10px",color:"#f0ece4",fontSize:14,boxSizing:"border-box"}}/>
                         </div>
                       ))}
