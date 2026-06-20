@@ -271,6 +271,9 @@ export default function FitnessTracker(){
   const [openItem,setOpenItem]           = useState(null);
   const [newInbody,setNewInbody]         = useState({date:todayStr,weight:"",muscle:"",fatMass:"",fatPct:"",score:""});
   const [showInbodyForm,setShowInbodyForm] = useState(false);
+  const [ocrLoading,setOcrLoading]       = useState(false);
+  const [ocrProgress,setOcrProgress]     = useState(0);
+  const [ocrRawText,setOcrRawText]       = useState("");
   const [showGoalForm,setShowGoalForm]     = useState(false);
   const [goals,setGoals]                   = useState(GOALS);
   const [baseInbody,setBaseInbody]         = useState(INITIAL_INBODY);
@@ -397,6 +400,76 @@ export default function FitnessTracker(){
     setNewInbody({date:todayStr,weight:"",muscle:"",fatMass:"",fatPct:"",score:""});
     setShowInbodyForm(false);
   }
+
+  // ── 인바디 결과지 OCR 자동 인식 ──────────────────────
+  function parseInbodyText(text){
+    const lines=text.split("\n").map(l=>l.trim()).filter(Boolean);
+    const fullText=text.replace(/\n/g," ");
+    const found={weight:"",muscle:"",fatMass:"",fatPct:"",score:""};
+
+    function findNumberNear(keywords){
+      for(const line of lines){
+        for(const kw of keywords){
+          if(line.includes(kw)){
+            const nums=line.match(/\d+\.?\d*/g);
+            if(nums&&nums.length){
+              // 키워드 자체에 포함된 숫자(예:체중1) 제거 위해 너무 작은 값(1~2자리 인덱스성 숫자)은 건너뛰는 간단 휴리스틱
+              const candidate=nums.find(n=>parseFloat(n)>0);
+              if(candidate) return candidate;
+            }
+          }
+        }
+      }
+      return "";
+    }
+
+    found.weight =findNumberNear(["체중","Weight"]);
+    found.muscle =findNumberNear(["골격근량","SMM","Skeletal"]);
+    found.fatMass=findNumberNear(["체지방량","BFM","Body Fat Mass"]);
+    found.fatPct =findNumberNear(["체지방률","PBF","체지방율"]);
+    found.score  =findNumberNear(["인바디점수","InBody점수","InBody Score","점수"]);
+
+    // 정규식 백업: 키워드 못 찾으면 전체 텍스트에서 패턴으로 재시도
+    if(!found.fatPct){
+      const m=fullText.match(/(\d{1,2}\.\d)\s*%/);
+      if(m) found.fatPct=m[1];
+    }
+    return found;
+  }
+
+  async function handleInbodyImageUpload(e){
+    const file=e.target.files?.[0];
+    if(!file) return;
+    if(!window.Tesseract){
+      flash("OCR 라이브러리 로딩 중, 잠시 후 다시 시도해주세요");
+      return;
+    }
+    setOcrLoading(true); setOcrProgress(0); setOcrRawText("");
+    try{
+      const result=await window.Tesseract.recognize(file,"kor+eng",{
+        logger:m=>{ if(m.status==="recognizing text") setOcrProgress(Math.round((m.progress||0)*100)); }
+      });
+      const text=result?.data?.text||"";
+      setOcrRawText(text);
+      const parsed=parseInbodyText(text);
+      setNewInbody(prev=>({
+        ...prev,
+        weight:parsed.weight||prev.weight,
+        muscle:parsed.muscle||prev.muscle,
+        fatMass:parsed.fatMass||prev.fatMass,
+        fatPct:parsed.fatPct||prev.fatPct,
+        score:parsed.score||prev.score,
+      }));
+      setShowInbodyForm(true);
+      flash("자동 인식 완료, 숫자 확인 후 저장하세요");
+    }catch(err){
+      console.error("OCR error",err);
+      flash("인식 실패, 직접 입력해주세요");
+    }
+    setOcrLoading(false); setOcrProgress(0);
+    e.target.value="";
+  }
+
 
   function saveCategories(cats){
     setCategories(cats); persistCats(cats);
@@ -1383,6 +1456,28 @@ export default function FitnessTracker(){
                 + 기록 추가
               </button>
             </div>
+
+            <label style={{display:"block",marginBottom:14,background:"#1e1e1e",border:"1px dashed #C8A96E",borderRadius:12,padding:"14px",textAlign:"center",cursor:"pointer"}}>
+              <input type="file" accept="image/*" onChange={handleInbodyImageUpload} style={{display:"none"}}/>
+              {ocrLoading?(
+                <div>
+                  <div style={{fontSize:12,color:"#C8A96E",fontWeight:700}}>📷 인바디 결과지 분석 중... {ocrProgress}%</div>
+                  <div style={{marginTop:8,background:"#2a2a2a",borderRadius:6,height:6,overflow:"hidden"}}>
+                    <div style={{width:`${ocrProgress}%`,height:"100%",background:"#C8A96E",transition:"width 0.3s"}}/>
+                  </div>
+                </div>
+              ):(
+                <div style={{fontSize:12,color:"#C8A96E",fontWeight:700}}>📷 인바디 결과지 사진으로 자동 입력</div>
+              )}
+              <div style={{fontSize:10,color:"#666",marginTop:4}}>사진을 선명하게 찍으면 인식률이 높아져요 · 인식 후 숫자는 꼭 확인해주세요</div>
+            </label>
+
+            {ocrRawText&&!showInbodyForm&&(
+              <div style={{marginBottom:14,padding:10,background:"#161616",borderRadius:8,fontSize:10,color:"#555",maxHeight:80,overflowY:"auto"}}>
+                인식된 원본 텍스트: {ocrRawText.slice(0,300)}
+              </div>
+            )}
+
             {showInbodyForm&&(
               <div style={{background:"#1e1e1e",borderRadius:12,padding:16,marginBottom:16}}>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
