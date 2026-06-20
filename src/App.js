@@ -1656,7 +1656,12 @@ export default function FitnessTracker(){
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
               <div style={{fontSize:12,color:"#C8A96E",letterSpacing:2,textTransform:"uppercase"}}>측정 기록</div>
-              <button onClick={()=>setShowInbodyForm(!showInbodyForm)} style={{background:"#C8A96E",color:"#141414",border:"none",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+              <button onClick={()=>{
+                if(!showInbodyForm&&latest){
+                  setNewInbody({date:todayStr,weight:latest.weight,muscle:latest.muscle,fatMass:latest.fatMass,fatPct:latest.fatPct,score:latest.score});
+                }
+                setShowInbodyForm(!showInbodyForm);
+              }} style={{background:"#C8A96E",color:"#141414",border:"none",borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
                 + 기록 추가
               </button>
             </div>
@@ -1685,17 +1690,34 @@ export default function FitnessTracker(){
             {showInbodyForm&&(
               <div style={{background:"#1e1e1e",borderRadius:12,padding:16,marginBottom:16}}>
                 <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:8,marginBottom:12}}>
-                  {[{key:"date",label:"측정일",type:"date"},{key:"weight",label:"체중(kg)",type:"number"},
-                    {key:"muscle",label:"골격근량(kg)",type:"number"},{key:"fatMass",label:"체지방량(kg)",type:"number"},
-                    {key:"fatPct",label:"체지방률(%)",type:"number"},{key:"score",label:"인바디 점수",type:"number"}].map(f=>(
-                    <div key={f.key} style={{minWidth:0,overflow:"hidden"}}>
-                      <div style={{fontSize:10,color:"#555",marginBottom:4}}>{f.label}</div>
-                      <input type={f.type} value={newInbody[f.key]} onChange={e=>setNewInbody(p=>({...p,[f.key]:e.target.value}))}
-                        style={{width:"100%",minWidth:0,maxWidth:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"8px 6px",color:"#f0ece4",fontSize:f.type==="date"?11:13,boxSizing:"border-box"}}/>
-                    </div>
-                  ))}
+                  <div style={{minWidth:0,overflow:"hidden"}}>
+                    <div style={{fontSize:10,color:"#555",marginBottom:4}}>측정일</div>
+                    <input type="date" value={newInbody.date} onChange={e=>setNewInbody(p=>({...p,date:e.target.value}))}
+                      style={{width:"100%",minWidth:0,maxWidth:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"8px 6px",color:"#f0ece4",fontSize:11,boxSizing:"border-box"}}/>
+                  </div>
+                  <div style={{minWidth:0,overflow:"hidden"}}>
+                    <div style={{fontSize:10,color:"#555",marginBottom:4}}>인바디 점수</div>
+                    <input type="number" value={newInbody.score} onChange={e=>setNewInbody(p=>({...p,score:e.target.value}))}
+                      style={{width:"100%",minWidth:0,maxWidth:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"8px 6px",color:"#f0ece4",fontSize:13,boxSizing:"border-box"}}/>
+                  </div>
                 </div>
-                <button onClick={addInbody} style={{width:"100%",background:"#C8A96E",color:"#141414",border:"none",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer"}}>저장</button>
+
+                {[{key:"weight",label:"체중",unit:"kg"},{key:"muscle",label:"골격근량",unit:"kg"},{key:"fatMass",label:"체지방량",unit:"kg"},{key:"fatPct",label:"체지방률",unit:"%"}].map(f=>(
+                  <div key={f.key} style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#2a2a2a",borderRadius:10,padding:"8px 12px",marginBottom:6}}>
+                    <div style={{fontSize:11,color:"#888"}}>{f.label}</div>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <button onClick={()=>setNewInbody(p=>({...p,[f.key]:Math.round(((parseFloat(p[f.key])||0)-0.1)*10)/10}))}
+                        style={{width:28,height:28,borderRadius:8,border:"1px solid #444",background:"#1e1e1e",color:"#E85D3D",fontSize:15,cursor:"pointer"}}>−</button>
+                      <div style={{minWidth:54,textAlign:"center",fontSize:14,fontWeight:700,color:"#f0ece4"}}>
+                        {newInbody[f.key]===""?"-":newInbody[f.key]}{f.unit}
+                      </div>
+                      <button onClick={()=>setNewInbody(p=>({...p,[f.key]:Math.round(((parseFloat(p[f.key])||0)+0.1)*10)/10}))}
+                        style={{width:28,height:28,borderRadius:8,border:"1px solid #444",background:"#1e1e1e",color:"#6ec87a",fontSize:15,cursor:"pointer"}}>＋</button>
+                    </div>
+                  </div>
+                ))}
+
+                <button onClick={addInbody} style={{width:"100%",marginTop:8,background:"#C8A96E",color:"#141414",border:"none",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer"}}>저장</button>
               </div>
             )}
             {[...inbodyLogs].reverse().map((log,i)=>(
