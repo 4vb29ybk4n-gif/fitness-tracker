@@ -326,6 +326,10 @@ export default function FitnessTracker(){
   const [goalDelta,setGoalDelta]           = useState({muscle:2.0,fatMass:-2.0,fatPct:-3.0});
   const [useManualEntry,setUseManualEntry] = useState(false);
   const [inlineEdit,setInlineEdit]       = useState(null);
+  const [inlineEditInbody,setInlineEditInbody] = useState(null);
+  const [editInbodyIdx,setEditInbodyIdx]   = useState(null);
+  const [editInbodyVals,setEditInbodyVals] = useState({date:"",weight:"",muscle:"",fatMass:"",fatPct:"",score:""});
+  const [celebration,setCelebration]     = useState(null); // {headline, detail}
   const [newItemName,setNewItemName]     = useState("");
   const [newItemType,setNewItemType]     = useState("minutes");
   const [showCatForm,setShowCatForm]     = useState(false);
@@ -343,8 +347,11 @@ export default function FitnessTracker(){
   const [nicknameInput,setNicknameInput] = useState("");
   const [groupMembers,setGroupMembers]   = useState([]);
   const [groupLoading,setGroupLoading]   = useState(false);
+  const [groupStartDate,setGroupStartDate] = useState("");
   const [groupEndDate,setGroupEndDate]   = useState("");
+  const [groupStartInput,setGroupStartInput] = useState("");
   const [groupEndInput,setGroupEndInput] = useState("");
+  const [editingGroupPeriod,setEditingGroupPeriod] = useState(false);
   const [showCreateGroupForm,setShowCreateGroupForm] = useState(false);
   const [showAddGroupForm,setShowAddGroupForm] = useState(false);
   const [groupCounts,setGroupCounts]     = useState({}); // {code: memberCount}
@@ -438,13 +445,69 @@ export default function FitnessTracker(){
 
   function addInbody(){
     if(!newInbody.date||!newInbody.weight) return;
-    const next=[...inbodyLogs,{date:newInbody.date,weight:parseFloat(newInbody.weight)||0,
+    const prevLatest=inbodyLogs[inbodyLogs.length-1];
+    const newLog={date:newInbody.date,weight:parseFloat(newInbody.weight)||0,
       muscle:parseFloat(newInbody.muscle)||0,fatMass:parseFloat(newInbody.fatMass)||0,
       fatPct:parseFloat(newInbody.fatPct)||0,score:parseInt(newInbody.score)||0,
-    }].sort((a,b)=>a.date.localeCompare(b.date));
+    };
+    const next=[...inbodyLogs,newLog].sort((a,b)=>a.date.localeCompare(b.date));
     setInbodyLogs(next); persistInbody(next);
     setNewInbody({date:todayStr,weight:"",muscle:"",fatMass:"",fatPct:"",score:""});
     setShowInbodyForm(false);
+    checkImprovement(prevLatest,newLog);
+  }
+
+  function checkImprovement(prev,curr){
+    if(!prev) return;
+    const muscleUp=curr.muscle>prev.muscle;
+    const fatDown=curr.fatMass<prev.fatMass;
+    const fatPctDown=curr.fatPct<prev.fatPct;
+    const muscleDown=curr.muscle<prev.muscle;
+    const fatUp=curr.fatMass>prev.fatMass;
+    const fatPctUp=curr.fatPct>prev.fatPct;
+    const improvedCount=[muscleUp,fatDown,fatPctDown].filter(Boolean).length;
+    const worsenedCount=[muscleDown,fatUp,fatPctUp].filter(Boolean).length;
+
+    if(improvedCount===0&&worsenedCount===0) return; // 완전 동일, 메시지 없음
+
+    if(improvedCount>0&&worsenedCount===0){
+      const messages=[];
+      if(muscleUp) messages.push(`골격근량 +${Math.round((curr.muscle-prev.muscle)*10)/10}kg`);
+      if(fatDown) messages.push(`체지방량 ${Math.round((curr.fatMass-prev.fatMass)*10)/10}kg`);
+      if(fatPctDown) messages.push(`체지방률 ${Math.round((curr.fatPct-prev.fatPct)*10)/10}%`);
+      const headline=improvedCount>=2?"전체적으로 좋아졌어요! 🎉":"한 걸음 더 나아갔어요 ✨";
+      setCelebration({headline,detail:messages.join(" · "),mood:"good"});
+    }else{
+      setCelebration({headline:"괜찮아요, 누구나 그런 날이 있어요 🌱",detail:"며칠 뒤에 꼭 다시 재보자!",mood:"soft"});
+    }
+    setTimeout(()=>setCelebration(null),3200);
+  }
+
+  function deleteInbodyLog(idx){
+    if(inbodyLogs.length<=1){ flash("최소 1개의 기록은 남아있어야 해요"); return; }
+    const target=inbodyLogs[idx];
+    const ok=window.confirm(`${target.date} 측정 기록을 삭제할까요?`);
+    if(!ok) return;
+    const next=inbodyLogs.filter((_,i)=>i!==idx);
+    setInbodyLogs(next); persistInbody(next);
+    flash("삭제됨 ✓");
+  }
+
+  function startEditInbodyLog(idx){
+    const log=inbodyLogs[idx];
+    setEditInbodyIdx(idx);
+    setEditInbodyVals({date:log.date,weight:log.weight,muscle:log.muscle,fatMass:log.fatMass,fatPct:log.fatPct,score:log.score});
+  }
+
+  function saveEditInbodyLog(){
+    if(editInbodyIdx===null) return;
+    const v=editInbodyVals;
+    const updated={date:v.date,weight:parseFloat(v.weight)||0,muscle:parseFloat(v.muscle)||0,
+      fatMass:parseFloat(v.fatMass)||0,fatPct:parseFloat(v.fatPct)||0,score:parseInt(v.score)||0};
+    const next=inbodyLogs.map((log,i)=>i===editInbodyIdx?updated:log).sort((a,b)=>a.date.localeCompare(b.date));
+    setInbodyLogs(next); persistInbody(next);
+    setEditInbodyIdx(null);
+    flash("수정 완료 ✓");
   }
 
   // 최초 시작: 롤러 휠/수동 입력값 → 시작수치 + 첫 측정기록으로 동시 저장
@@ -721,6 +784,8 @@ export default function FitnessTracker(){
       }
       const endData=await loadData("shared_group_meta",activeGroupCode+"_endDate","");
       setGroupEndDate(endData||"");
+      const startData=await loadData("shared_group_meta",activeGroupCode+"_startDate","");
+      setGroupStartDate(startData||"");
     }catch(e){ console.error("group fetch error",e); }
     setGroupLoading(false);
   }
@@ -774,11 +839,12 @@ export default function FitnessTracker(){
     setActiveGroupCode(code);
     await saveData(userId,"activeGroupCode",code);
     await saveData("shared_group_meta",code+"_exists",true);
-    if(groupEndInput){
+    if(groupStartInput&&groupEndInput){
+      await saveData("shared_group_meta",code+"_startDate",groupStartInput);
       await saveData("shared_group_meta",code+"_endDate",groupEndInput);
     }
     setShowGroupModal(false); setShowCreateGroupForm(false); setShowAddGroupForm(false);
-    setGroupInput(""); setNicknameInput(""); setGroupEndInput("");
+    setGroupInput(""); setNicknameInput(""); setGroupStartInput(""); setGroupEndInput("");
     flash("새 그룹 생성 완료 ✓");
   }
 
@@ -809,6 +875,8 @@ export default function FitnessTracker(){
 
   async function switchActiveGroup(code){
     setActiveGroupCode(code);
+    setEditingGroupPeriod(false);
+    setGroupStartInput(""); setGroupEndInput("");
     await saveData(userId,"activeGroupCode",code);
   }
 
@@ -824,16 +892,43 @@ export default function FitnessTracker(){
       await saveData(userId,"activeGroupCode",nextActive);
       setGroupMembers([]);
       setGroupEndDate("");
+      setGroupStartDate("");
     }
     flash("그룹에서 나갔어요");
   }
 
-  async function saveGroupEndDate(){
-    if(!groupEndInput||!activeGroupCode) return;
+  async function saveGroupPeriod(){
+    if(!groupEndInput||!groupStartInput||!activeGroupCode) return;
+    await saveData("shared_group_meta",activeGroupCode+"_startDate",groupStartInput);
     await saveData("shared_group_meta",activeGroupCode+"_endDate",groupEndInput);
+    setGroupStartDate(groupStartInput);
     setGroupEndDate(groupEndInput);
-    setGroupEndInput("");
+    setGroupStartInput(""); setGroupEndInput("");
+    setEditingGroupPeriod(false);
     flash("목표 기간 설정 완료 ✓");
+  }
+
+  // 그룹 재대결: 같은 그룹 코드로 기간만 새로 설정 (멤버 누적 기록은 유지됨)
+  function startRematch(){
+    setGroupStartInput(todayStr);
+    setGroupEndInput("");
+    setEditingGroupPeriod(true);
+  }
+
+  // 그룹 완전 삭제: 모든 멤버 데이터 + 기간 정보 제거
+  async function disbandGroup(){
+    const ok=window.confirm(`"${activeGroupCode}" 그룹을 완전히 삭제할까요?\n모든 멤버의 기록과 순위가 사라지고, 그룹 코드도 다시 쓸 수 없게 돼요.`);
+    if(!ok) return;
+    await saveData(userId,"group_"+activeGroupCode+"_"+userId,null);
+    await saveData("shared_group_meta",activeGroupCode+"_endDate","");
+    await saveData("shared_group_meta",activeGroupCode+"_startDate","");
+    const nextGroups=myGroups.filter(g=>g.code!==activeGroupCode);
+    await persistMyGroups(nextGroups);
+    const nextActive=nextGroups.length?nextGroups[0].code:"";
+    setActiveGroupCode(nextActive);
+    await saveData(userId,"activeGroupCode",nextActive);
+    setGroupMembers([]); setGroupEndDate(""); setGroupStartDate("");
+    flash("그룹이 삭제됐어요");
   }
 
   async function shareGroup(){
@@ -896,6 +991,30 @@ export default function FitnessTracker(){
         </div>
       )}
 
+      {celebration&&(
+        <div style={{position:"fixed",top:16,left:16,right:16,zIndex:1100,display:"flex",justifyContent:"center",pointerEvents:"none"}}>
+          <div style={{position:"relative",maxWidth:360,width:"100%",background:celebration.mood==="good"?"linear-gradient(135deg,#2a2410,#1a1a1a)":"linear-gradient(135deg,#1e2420,#1a1a1a)",border:celebration.mood==="good"?"1px solid #C8A96E":"1px solid #3a4a3e",borderRadius:14,padding:"14px 18px",boxShadow:celebration.mood==="good"?"0 8px 24px rgba(200,169,110,0.25)":"0 8px 24px rgba(110,200,122,0.12)",overflow:"hidden",animation:"celebrateIn 0.35s ease-out"}}>
+            {celebration.mood==="good"&&Array.from({length:14}).map((_,i)=>(
+              <div key={i} style={{
+                position:"absolute",top:-10,left:`${(i*7+5)%100}%`,
+                width:6,height:6,borderRadius:i%2===0?"50%":"2px",
+                background:["#C8A96E","#6ec87a","#E85D3D","#f0ece4"][i%4],
+                animation:`confettiFall ${1.6+(i%5)*0.2}s ease-in ${(i%6)*0.05}s forwards`,
+                opacity:0.9,
+              }}/>
+            ))}
+            <div style={{fontSize:14,fontWeight:700,color:celebration.mood==="good"?"#C8A96E":"#9bc9a5",position:"relative",zIndex:1}}>{celebration.headline}</div>
+            {celebration.detail&&(
+              <div style={{fontSize:11,color:"#999",marginTop:3,position:"relative",zIndex:1}}>{celebration.detail}</div>
+            )}
+          </div>
+          <style>{`
+            @keyframes celebrateIn { from{opacity:0;transform:translateY(-8px);} to{opacity:1;transform:translateY(0);} }
+            @keyframes confettiFall { from{transform:translateY(0) rotate(0deg);opacity:0.9;} to{transform:translateY(90px) rotate(180deg);opacity:0;} }
+          `}</style>
+        </div>
+      )}
+
       {showGroupModal&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:1001,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
           <div style={{width:"100%",maxWidth:360,background:"#1a1a1a",borderRadius:16,padding:20,maxHeight:"80vh",overflowY:"auto"}}>
@@ -924,10 +1043,20 @@ export default function FitnessTracker(){
                 </div>
                 {showCreateGroupForm&&(
                   <div style={{marginBottom:18}}>
-                    <div style={{fontSize:11,color:"#888",marginBottom:6}}>목표 종료일 (그룹 기본 설정, 선택)</div>
-                    <input type="date" value={groupEndInput} onChange={e=>setGroupEndInput(e.target.value)}
-                      style={{width:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"10px",color:"#f0ece4",fontSize:13,boxSizing:"border-box"}}/>
-                    <div style={{fontSize:10,color:"#555",marginTop:4}}>여기서 설정한 종료일이 그룹의 기본값이 되어, 나중에 참여하는 친구들도 똑같이 적용돼요.</div>
+                    <div style={{fontSize:11,color:"#888",marginBottom:6}}>경쟁 기간 (그룹 기본 설정, 선택)</div>
+                    <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:8}}>
+                      <div>
+                        <div style={{fontSize:9,color:"#555",marginBottom:3}}>시작일</div>
+                        <input type="date" value={groupStartInput} onChange={e=>setGroupStartInput(e.target.value)}
+                          style={{width:"100%",minWidth:0,background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"10px 6px",color:"#f0ece4",fontSize:12,boxSizing:"border-box"}}/>
+                      </div>
+                      <div>
+                        <div style={{fontSize:9,color:"#555",marginBottom:3}}>종료일</div>
+                        <input type="date" value={groupEndInput} onChange={e=>setGroupEndInput(e.target.value)}
+                          style={{width:"100%",minWidth:0,background:"#2a2a2a",border:"1px solid #333",borderRadius:8,padding:"10px 6px",color:"#f0ece4",fontSize:12,boxSizing:"border-box"}}/>
+                      </div>
+                    </div>
+                    <div style={{fontSize:10,color:"#555",marginTop:4}}>여기서 설정한 기간이 그룹의 기본값이 되어, 나중에 참여하는 친구들도 똑같이 적용돼요.</div>
                   </div>
                 )}
                 <div style={{display:"flex",gap:8}}>
@@ -963,27 +1092,55 @@ export default function FitnessTracker(){
                 </div>
 
                 {/* 목표 기간 설정 */}
-                {groupEndDate?(
+                {(groupEndDate&&!editingGroupPeriod)?(
                   (()=>{
                     const endD=parseDateStr(groupEndDate);
                     const dday=Math.ceil((endD-today)/86400000);
                     const isFinished=dday<0;
+                    let progressLabel="";
+                    if(groupStartDate){
+                      const startD=parseDateStr(groupStartDate);
+                      const totalDaysInPeriod=Math.round((endD-startD)/86400000)+1;
+                      const elapsedDays=Math.min(totalDaysInPeriod,Math.max(0,Math.round((today-startD)/86400000)+1));
+                      progressLabel=`${groupStartDate} ~ ${groupEndDate} · 총 ${totalDaysInPeriod}일 중 ${elapsedDays}일째`;
+                    }else{
+                      progressLabel=`목표일: ${groupEndDate}`;
+                    }
                     return(
                       <div style={{marginBottom:16,padding:"10px 12px",background:isFinished?"#2a1e1a":"rgba(200,169,110,0.1)",border:`1px solid ${isFinished?"#5a2a2a":"#C8A96E"}33`,borderRadius:8,textAlign:"center"}}>
                         <div style={{fontSize:12,color:isFinished?"#E85D3D":"#C8A96E",fontWeight:700}}>
                           {isFinished?"🏁 경쟁 기간 종료!":`⏳ D${dday===0?"-Day":dday>0?"-"+dday:"+"+(-dday)}`}
                         </div>
-                        <div style={{fontSize:10,color:"#666",marginTop:2}}>목표일: {groupEndDate}</div>
+                        <div style={{fontSize:10,color:"#666",marginTop:2}}>{progressLabel}</div>
+                        {!isFinished&&(
+                          <button onClick={()=>{setGroupStartInput(groupStartDate||todayStr);setGroupEndInput(groupEndDate);setEditingGroupPeriod(true);}}
+                            style={{marginTop:8,background:"none",border:"1px solid #444",borderRadius:6,color:"#888",fontSize:10,padding:"4px 10px",cursor:"pointer"}}>
+                            ✏️ 기간 재설정
+                          </button>
+                        )}
                       </div>
                     );
                   })()
                 ):(
                   <div style={{marginBottom:16,padding:"10px 12px",background:"#222",borderRadius:8}}>
-                    <div style={{fontSize:11,color:"#888",marginBottom:6}}>그룹 경쟁 종료일 설정 (선택)</div>
+                    <div style={{fontSize:11,color:"#888",marginBottom:6}}>그룹 경쟁 기간 설정</div>
+                    <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:6,marginBottom:6}}>
+                      <div>
+                        <div style={{fontSize:9,color:"#555",marginBottom:3}}>시작일</div>
+                        <input type="date" value={groupStartInput} onChange={e=>setGroupStartInput(e.target.value)}
+                          style={{width:"100%",minWidth:0,background:"#2a2a2a",border:"1px solid #333",borderRadius:6,padding:"7px 6px",color:"#f0ece4",fontSize:12,boxSizing:"border-box"}}/>
+                      </div>
+                      <div>
+                        <div style={{fontSize:9,color:"#555",marginBottom:3}}>종료일</div>
+                        <input type="date" value={groupEndInput} onChange={e=>setGroupEndInput(e.target.value)}
+                          style={{width:"100%",minWidth:0,background:"#2a2a2a",border:"1px solid #333",borderRadius:6,padding:"7px 6px",color:"#f0ece4",fontSize:12,boxSizing:"border-box"}}/>
+                      </div>
+                    </div>
                     <div style={{display:"flex",gap:6}}>
-                      <input type="date" value={groupEndInput} onChange={e=>setGroupEndInput(e.target.value)}
-                        style={{flex:1,background:"#2a2a2a",border:"1px solid #333",borderRadius:6,padding:"7px 8px",color:"#f0ece4",fontSize:12,boxSizing:"border-box"}}/>
-                      <button onClick={saveGroupEndDate} style={{background:"#C8A96E",color:"#141414",border:"none",borderRadius:6,padding:"7px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>설정</button>
+                      <button onClick={saveGroupPeriod} style={{flex:1,background:"#C8A96E",color:"#141414",border:"none",borderRadius:6,padding:"7px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>설정</button>
+                      {groupEndDate&&(
+                        <button onClick={()=>{setEditingGroupPeriod(false);setGroupStartInput("");setGroupEndInput("");}} style={{background:"#2a2a2a",color:"#888",border:"none",borderRadius:6,padding:"7px 12px",fontSize:11,cursor:"pointer"}}>취소</button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -999,6 +1156,14 @@ export default function FitnessTracker(){
                         <span style={{fontSize:14,color:"#C8A96E",fontWeight:700}}>{m.totalWorkoutDays||0}일</span>
                       </div>
                     ))}
+                    <div style={{display:"flex",gap:8,marginTop:12}}>
+                      <button onClick={startRematch} style={{flex:1,background:"#C8A96E",color:"#141414",border:"none",borderRadius:8,padding:"10px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                        🔁 재대결 시작
+                      </button>
+                      <button onClick={disbandGroup} style={{background:"#3a1a1a",border:"1px solid #5a2a2a",color:"#E85D3D",borderRadius:8,padding:"10px 14px",fontSize:12,cursor:"pointer"}}>
+                        그룹 삭제
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -1616,6 +1781,50 @@ export default function FitnessTracker(){
           )}
 
           <div style={{marginBottom:20}}>
+            <div style={{fontSize:12,color:"#C8A96E",letterSpacing:2,marginBottom:12,textTransform:"uppercase"}}>측정 기록 목록</div>
+            {[...inbodyLogs].map((log,i)=>i).reverse().map(origIdx=>{
+              const log=inbodyLogs[origIdx];
+              const isEditing=editInbodyIdx===origIdx;
+              return(
+                <div key={origIdx} style={{background:"#1e1e1e",borderRadius:10,padding:12,marginBottom:6}}>
+                  {!isEditing?(
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div>
+                        <div style={{fontSize:12,fontWeight:600,color:"#f0ece4"}}>{log.date}</div>
+                        <div style={{fontSize:11,color:"#888",marginTop:2}}>
+                          체중 {log.weight}kg · 골격근 {log.muscle}kg · 체지방 {log.fatMass}kg · {log.fatPct}%
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:6}}>
+                        <button onClick={()=>startEditInbodyLog(origIdx)} style={{background:"#2a2a2a",border:"1px solid #444",borderRadius:6,color:"#C8A96E",fontSize:11,padding:"5px 9px",cursor:"pointer"}}>✏️</button>
+                        <button onClick={()=>deleteInbodyLog(origIdx)} style={{background:"#2a2a2a",border:"1px solid #444",borderRadius:6,color:"#E85D3D",fontSize:11,padding:"5px 9px",cursor:"pointer"}}>🗑️</button>
+                      </div>
+                    </div>
+                  ):(
+                    <div>
+                      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:8,marginBottom:8}}>
+                        {[{key:"date",label:"측정일",type:"date"},{key:"weight",label:"체중(kg)",type:"number"},
+                          {key:"muscle",label:"골격근량(kg)",type:"number"},{key:"fatMass",label:"체지방량(kg)",type:"number"},
+                          {key:"fatPct",label:"체지방률(%)",type:"number"},{key:"score",label:"인바디점수",type:"number"}].map(f=>(
+                          <div key={f.key} style={{minWidth:0,overflow:"hidden"}}>
+                            <div style={{fontSize:9,color:"#555",marginBottom:3}}>{f.label}</div>
+                            <input type={f.type} value={editInbodyVals[f.key]} onChange={e=>setEditInbodyVals(p=>({...p,[f.key]:e.target.value}))}
+                              style={{width:"100%",minWidth:0,maxWidth:"100%",background:"#2a2a2a",border:"1px solid #333",borderRadius:6,padding:"6px 5px",color:"#f0ece4",fontSize:f.type==="date"?11:12,boxSizing:"border-box"}}/>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{display:"flex",gap:6}}>
+                        <button onClick={saveEditInbodyLog} style={{flex:1,background:"#C8A96E",color:"#141414",border:"none",borderRadius:6,padding:"8px",fontSize:12,fontWeight:700,cursor:"pointer"}}>저장</button>
+                        <button onClick={()=>setEditInbodyIdx(null)} style={{background:"#2a2a2a",color:"#888",border:"none",borderRadius:6,padding:"8px 12px",fontSize:12,cursor:"pointer"}}>취소</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{marginBottom:20}}>
             <div style={{fontSize:12,color:"#C8A96E",letterSpacing:2,marginBottom:12,textTransform:"uppercase"}}>변동 그래프</div>
             {[
               {label:"골격근량",field:"muscle",unit:"kg",color:"#6ec87a",goal:goals.muscle},
@@ -1708,9 +1917,21 @@ export default function FitnessTracker(){
                     <div style={{display:"flex",alignItems:"center",gap:10}}>
                       <button onClick={()=>setNewInbody(p=>({...p,[f.key]:Math.round(((parseFloat(p[f.key])||0)-0.1)*10)/10}))}
                         style={{width:28,height:28,borderRadius:8,border:"1px solid #444",background:"#1e1e1e",color:"#E85D3D",fontSize:15,cursor:"pointer"}}>−</button>
-                      <div style={{minWidth:54,textAlign:"center",fontSize:14,fontWeight:700,color:"#f0ece4"}}>
-                        {newInbody[f.key]===""?"-":newInbody[f.key]}{f.unit}
-                      </div>
+                      {inlineEditInbody===f.key?(
+                        <input
+                          type="number"
+                          autoFocus
+                          value={newInbody[f.key]}
+                          onChange={e=>setNewInbody(p=>({...p,[f.key]:e.target.value}))}
+                          onBlur={()=>setInlineEditInbody(null)}
+                          onKeyDown={e=>{ if(e.key==="Enter") setInlineEditInbody(null); }}
+                          style={{minWidth:54,maxWidth:64,textAlign:"center",fontSize:14,fontWeight:700,color:"#f0ece4",background:"#141414",border:"1px solid #C8A96E",borderRadius:6,padding:"4px 2px"}}
+                        />
+                      ):(
+                        <div onClick={()=>setInlineEditInbody(f.key)} style={{minWidth:54,textAlign:"center",fontSize:14,fontWeight:700,color:"#f0ece4",cursor:"pointer",borderBottom:"1px dotted #555"}}>
+                          {newInbody[f.key]===""?"-":newInbody[f.key]}{f.unit}
+                        </div>
+                      )}
                       <button onClick={()=>setNewInbody(p=>({...p,[f.key]:Math.round(((parseFloat(p[f.key])||0)+0.1)*10)/10}))}
                         style={{width:28,height:28,borderRadius:8,border:"1px solid #444",background:"#1e1e1e",color:"#6ec87a",fontSize:15,cursor:"pointer"}}>＋</button>
                     </div>
